@@ -96,25 +96,26 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
         // Build the models endpoint based on provider
         const { getHttpFetch } = await import("@/lib/tauri-fetch")
         const httpFetch = await getHttpFetch()
-        let baseUrl = ""
+        let modelsUrl = ""
         if (llmConfig.provider === "ollama") {
-          baseUrl = llmConfig.ollamaUrl?.replace(/\/+$/, "") || "http://127.0.0.1:11434"
+          const base = (llmConfig.ollamaUrl || "http://127.0.0.1:11434").replace(/\/+$/, "")
+          modelsUrl = `${base}/api/tags`
         } else if (llmConfig.provider === "custom" || llmConfig.provider === "minimax") {
-          baseUrl = llmConfig.customEndpoint?.replace(/\/+$/, "").replace(/\/chat\/completions$/i, "").replace(/\/v1$/i, "") || ""
+          // customEndpoint 可能是 "/v1" 或 "/v1/chat/completions"，去掉 /chat/completions 保留 /v1
+          const base = (llmConfig.customEndpoint || "").replace(/\/+$/, "").replace(/\/chat\/completions$/i, "")
+          if (!base) { setModelStatus("disconnected"); return }
+          modelsUrl = `${base}/models`
         } else if (llmConfig.provider === "openai") {
-          baseUrl = "https://api.openai.com/v1"
+          modelsUrl = "https://api.openai.com/v1/models"
         } else if (llmConfig.provider === "anthropic") {
-          baseUrl = "https://api.anthropic.com"
+          // Anthropic 没有 /models 端点，配置有 key 就认为连接正常
+          setModelStatus("connected")
+          return
         } else {
           // claude-code, codex-cli etc. — assume connected if hasUsableLlm
           setModelStatus("connected")
           return
         }
-        if (!baseUrl) {
-          setModelStatus("disconnected")
-          return
-        }
-        const modelsUrl = `${baseUrl}/models`
         const headers: Record<string, string> = {}
         if (llmConfig.apiKey) headers["Authorization"] = `Bearer ${llmConfig.apiKey}`
         const response = await httpFetch(modelsUrl, {
