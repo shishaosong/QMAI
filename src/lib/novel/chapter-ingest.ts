@@ -62,6 +62,7 @@ export interface EventDetail {
 export interface ChapterSnapshot {
   chapterId: string
   chapterNumber: number
+  chapterTitle?: string
   summary: string
   characters: string[]
   characterAliases?: Record<string, string[]>
@@ -161,6 +162,7 @@ function normalizeChapterSnapshot(
   return {
     chapterId,
     chapterNumber,
+    chapterTitle: normalizeSnapshotText(raw.chapterTitle) || undefined,
     summary: normalizeSnapshotText(raw.summary),
     characters: normalizeSnapshotList(raw.characters),
     characterAliases: normalizeSnapshotAliasRecord(raw.characterAliases),
@@ -615,6 +617,7 @@ export interface SnapshotHistoryEntry {
 }
 
 function snapshotFilePrefix(chapterNumber: number): string {
+  if (chapterNumber < 0) return `outline-${String(Math.abs(chapterNumber)).padStart(3, "0")}`
   return String(chapterNumber).padStart(3, "0")
 }
 
@@ -1029,7 +1032,10 @@ export async function loadSnapshot(
   chapterNumber: number,
 ): Promise<ChapterSnapshot | null> {
   const pp = normalizePath(projectPath)
-  const jsonPath = `${pp}/.novel/snapshots/${String(chapterNumber).padStart(3, "0")}.snapshot.json`
+  const prefix = chapterNumber < 0
+    ? `outline-${String(Math.abs(chapterNumber)).padStart(3, "0")}`
+    : String(chapterNumber).padStart(3, "0")
+  const jsonPath = `${pp}/.novel/snapshots/${prefix}.snapshot.json`
   try {
     const raw = await readFile(jsonPath)
     return normalizeChapterSnapshot(JSON.parse(raw), {
@@ -1048,7 +1054,13 @@ export async function listSnapshots(projectPath: string): Promise<number[]> {
     const tree = await listDirectory(snapshotDir)
     return tree
       .filter(f => f.name.endsWith(".snapshot.json"))
-      .map(f => parseInt(f.name.split(".")[0], 10))
+      .map(f => {
+        const stem = f.name.split(".")[0]
+        // outline-001 → -1, outline-002 → -2
+        const outlineMatch = stem.match(/^outline-(\d+)$/)
+        if (outlineMatch) return -parseInt(outlineMatch[1], 10)
+        return parseInt(stem, 10)
+      })
       .filter(n => !isNaN(n))
       .sort((a, b) => a - b)
   } catch {
@@ -1076,6 +1088,20 @@ export async function ingestOutline(
 
   const content = await readFile(outlinePath)
   const body = content.length > 8000 ? content.slice(0, 8000) : content
+
+  // 从文件路径提取大纲名称作为标题
+  const normalizedOutlinePath = normalizePath(outlinePath)
+  const fileName = normalizedOutlinePath.split("/").pop() ?? "outline"
+  const outlineName = fileName.replace(/\.\w+$/, "") // 去掉扩展名，如 "总大纲"、"人物小传"
+
+  // 根据文件名生成唯一的负数 chapterNumber（不同大纲不会互相覆盖）
+  // 使用文件名的简单哈希生成 1-999 范围的数字
+  let hash = 0
+  for (let i = 0; i < outlineName.length; i++) {
+    hash = ((hash << 5) - hash + outlineName.charCodeAt(i)) | 0
+  }
+  const outlineNumber = -(Math.abs(hash % 999) + 1) // -1 到 -999
+  const chapterId = `outline-${outlineName}`
 
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)
@@ -1133,11 +1159,12 @@ ${body}
     const parsed = JSON.parse(jsonMatch[0])
     const snapshot = normalizeChapterSnapshot({
       ...parsed,
-      chapterId: "outline-init",
-      chapterNumber: 0,
+      chapterId,
+      chapterNumber: outlineNumber,
+      chapterTitle: outlineName,
       entityIsNew: {},
       validationWarnings: [],
-    }, { chapterId: "outline-init", chapterNumber: 0 })
+    }, { chapterId, chapterNumber: outlineNumber })
     if (!snapshot) {
       throw new Error("Outline snapshot payload is invalid.")
     }

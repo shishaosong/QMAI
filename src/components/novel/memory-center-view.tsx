@@ -61,7 +61,7 @@ function SnapshotCard({
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-sm font-semibold">
-            {t("novel.memoryCenter.snapshots.chapter", { chapter: card.chapterNumber })}
+            {card.chapterTitle || t("novel.memoryCenter.snapshots.chapter", { chapter: card.chapterNumber })}
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
             {card.memorySynced
@@ -77,7 +77,7 @@ function SnapshotCard({
           onClick={() =>
             onOpen(
               card.snapshotPath,
-              t("novel.memoryCenter.snapshots.chapter", { chapter: card.chapterNumber }),
+              card.chapterTitle || t("novel.memoryCenter.snapshots.chapter", { chapter: card.chapterNumber }),
               buttonId,
             )
           }

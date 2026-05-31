@@ -22,6 +22,7 @@ export interface MemoryCenterFilePreview {
 
 export interface MemoryCenterSnapshotCard {
   chapterNumber: number
+  chapterTitle?: string
   summary: string
   endingHook: string
   memorySynced: boolean
@@ -72,7 +73,10 @@ function isMemoryCenterFilePreview(file: MemoryCenterFilePreview | null): file i
 }
 
 function snapshotMarkdownPath(projectPath: string, chapterNumber: number): string {
-  return `${projectPath}/.novel/snapshots/${String(chapterNumber).padStart(3, "0")}.snapshot.md`
+  const prefix = chapterNumber < 0
+    ? `outline-${String(Math.abs(chapterNumber)).padStart(3, "0")}`
+    : String(chapterNumber).padStart(3, "0")
+  return `${projectPath}/.novel/snapshots/${prefix}.snapshot.md`
 }
 
 function hasSectionContent(section: MemoryCenterSection | null): section is MemoryCenterSection {
@@ -202,6 +206,7 @@ export function buildMemoryCenterSnapshotCards(
 
       return {
         chapterNumber: snapshot.chapterNumber,
+        chapterTitle: snapshot.chapterTitle,
         summary: snapshot.summary.trim(),
         endingHook: snapshot.endingHook.trim(),
         memorySynced: Boolean(snapshot.memorySyncedAt),
