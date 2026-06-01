@@ -9,6 +9,18 @@ export interface ChangelogEntry {
 
 export const CHANGELOG: ChangelogEntry[] = [
   {
+    version: "1.0.6",
+    date: "2026-06-01",
+    highlights: {
+      en: [
+        "Bumped the application version to 1.0.6 and rebuilt the Windows installer package.",
+      ],
+      zh: [
+        "版本号升级为 1.0.6，并重新构建 Windows 安装包。",
+      ],
+    },
+  },
+  {
     version: "1.0.5",
     date: "2026-06-01",
     highlights: {
