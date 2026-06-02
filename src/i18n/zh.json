@@ -354,7 +354,9 @@
       "output": "输出偏好",
       "interface": "界面",
       "novel": "小说",
+      "usageGuide": "软件使用说明",
       "maintenance": "维护",
+      "feedback": "反馈",
       "changelog": "更新日志",
       "about": "关于"
     },
@@ -369,6 +371,11 @@
         "modelListFailed": "\u6a21\u578b\u5217\u8868\u62c9\u53d6\u5931\u8d25\uff1a{{message}}",
         "modelSelectPlaceholder": "\u8bf7\u9009\u62e9\u5df2\u62c9\u53d6\u7684\u6a21\u578b",
         "modelManualPlaceholder": "\u4e5f\u53ef\u624b\u52a8\u8f93\u5165\u6a21\u578b"
+      },
+      "usageGuide": {
+        "title": "软件使用说明",
+        "description": "常用教程和小说功能说明会在浏览器中打开，方便边看边配置。",
+        "open": "打开"
       },
       "llm": {
         "title": "LLM 模型",

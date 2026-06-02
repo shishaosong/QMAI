@@ -648,7 +648,9 @@
       "output": "Output",
       "interface": "Interface",
       "novel": "Novel",
+      "usageGuide": "Usage Guide",
       "maintenance": "Maintenance",
+      "feedback": "Feedback",
       "changelog": "Changelog",
       "about": "About"
     },
@@ -663,6 +665,11 @@
         "modelListFailed": "Model list fetch failed: {{message}}",
         "modelSelectPlaceholder": "Choose a fetched model",
         "modelManualPlaceholder": "Or enter a model manually"
+      },
+      "usageGuide": {
+        "title": "Usage Guide",
+        "description": "Open tutorials and novel-writing guides in your browser while configuring the app.",
+        "open": "Open"
       },
       "llm": {
         "title": "LLM Model",

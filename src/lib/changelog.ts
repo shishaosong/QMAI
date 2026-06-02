@@ -10,13 +10,22 @@ export interface ChangelogEntry {
 export const CHANGELOG: ChangelogEntry[] = [
   {
     version: "1.0.6",
-    date: "2026-06-01",
+    date: "2026-06-02",
     highlights: {
       en: [
-        "Bumped the application version to 1.0.6 and rebuilt the Windows installer package.",
+        "Fixed theme color display issues, including white contrast in the blue theme and red accents in the dark theme.",
+        "Saving a final chapter and extracting raw outline memory now generate snapshots and sync them to novel memory automatically, removing the old manual sync step.",
+        "Added a feedback entry in Settings so users can submit issues and suggestions for backend review.",
+        "Added a software usage guide in Settings with links to the complete guide, official user manual, and novel-writing introduction.",
+        "Added a dismissible lower-left usage-guide prompt that opens the software usage guide directly.",
       ],
       zh: [
-        "版本号升级为 1.0.6，并重新构建 Windows 安装包。",
+        "修复颜色设置中部分主题显示异常的问题，优化蓝色主题下白色文字/背景显示，并调整黑色主题中的红色效果。",
+        "章节保存为正式章节后会自动生成快照并同步到小说记忆；大纲库提取原始记忆后也会自动生成快照并同步记忆。",
+        "移除原本需要手动点击的“同步记忆”步骤，减少章节和大纲记忆整理时的重复操作。",
+        "在设置中新增“反馈”入口，用户可以直接提交使用问题、建议或异常反馈，反馈内容会进入后台方便查看和处理。",
+        "在设置中新增“软件使用说明”入口，内置完整使用说明、正式用户手册、小说功能介绍三个文档链接。",
+        "在软件左下角新增“软件不知道怎么使用？点我”提示，点击后会直接进入设置中的“软件使用说明”页面，用户也可以手动关闭该提示窗。",
       ],
     },
   },
