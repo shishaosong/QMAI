@@ -3,6 +3,7 @@ import type { LintResult } from "@/lib/lint"
 import { normalizePath } from "@/lib/path-utils"
 import { moveFileToTrash } from "@/lib/trash"
 import type { NovelReviewResult } from "./review-adapter"
+import type { DimensionReviewResult, SixReviewDimensionKey } from "./dimension-review-adapter"
 
 export type GenerationHistoryKind = "lint" | "review"
 
@@ -15,6 +16,7 @@ export interface GenerationHistoryEntry {
   chapterNumber?: number
   sourcePath?: string
   results: GenerationHistoryResult[]
+  dimensionResults?: Partial<Record<SixReviewDimensionKey, DimensionReviewResult>>
   createdAt: string
   filePath: string
 }
@@ -25,6 +27,7 @@ export interface SaveGenerationHistoryInput {
   chapterNumber?: number
   sourcePath?: string
   results: GenerationHistoryResult[]
+  dimensionResults?: Partial<Record<SixReviewDimensionKey, DimensionReviewResult>>
 }
 
 function pad(value: number): string {
@@ -91,6 +94,7 @@ export async function saveGenerationHistoryEntry(
     chapterNumber: input.chapterNumber,
     sourcePath: input.sourcePath ? normalizePath(input.sourcePath) : undefined,
     results: input.results,
+    dimensionResults: input.dimensionResults,
     createdAt: new Date(now).toISOString(),
     filePath,
   }

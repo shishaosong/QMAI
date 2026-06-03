@@ -1352,6 +1352,9 @@ export async function deleteChapterSnapshots(projectPath: string, chapterNumber:
   try { if (await fileExists(jsonPath)) await deleteFile(jsonPath) } catch { /* ignore */ }
   try { if (await fileExists(mdPath)) await deleteFile(mdPath) } catch { /* ignore */ }
   try { if (await fileExists(historyDir)) await deleteFile(historyDir) } catch { /* ignore */ }
+  await rebuildDerivedMemoryFromSnapshots(pp)
+  clearGraphCache()
+  useWikiStore.getState().bumpDataVersion()
 }
 
 export async function ingestOutline(

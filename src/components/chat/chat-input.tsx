@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback } from "react"
+import { useRef, useState, useCallback, type ReactNode } from "react"
 import { Send, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { isImeComposing } from "@/lib/keyboard-utils"
@@ -8,9 +8,10 @@ interface ChatInputProps {
   onStop: () => void
   isStreaming: boolean
   placeholder?: string
+  leadingControls?: ReactNode
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, placeholder }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingControls }: ChatInputProps) {
   const [value, setValue] = useState("")
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
@@ -48,6 +49,7 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder }: ChatInpu
 
   return (
     <div className="flex items-end gap-2 border-t p-3">
+      {leadingControls ? <div className="shrink-0">{leadingControls}</div> : null}
       <textarea
         ref={textareaRef}
         value={value}

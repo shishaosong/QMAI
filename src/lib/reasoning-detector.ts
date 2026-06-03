@@ -40,6 +40,11 @@ const REASONING_FIELD_RE =
   /"reasoning(?:_content)?"\s*:\s*"((?:[^"\\]|\\.)*)"/g
 
 export function countReasoningCharsInLine(rawLine: string): number {
+  const extracted = extractReasoningTextFromLine(rawLine)
+  if (extracted.length > 0) {
+    return extracted.reduce((total, part) => total + part.length, 0)
+  }
+
   let total = 0
   for (const match of rawLine.matchAll(REASONING_FIELD_RE)) {
     total += match[1].length
@@ -56,7 +61,8 @@ export function extractReasoningTextFromLine(rawLine: string): string[] {
   try {
     const parsed = JSON.parse(data) as {
       choices?: Array<{ delta?: { reasoning_content?: string; reasoning?: string } }>
-      delta?: { type?: string; text?: string; thinking?: string }
+      type?: string
+      delta?: string | { type?: string; text?: string; thinking?: string }
       candidates?: Array<{
         content?: { parts?: Array<{ text?: string; thought?: boolean }> }
       }>
@@ -69,7 +75,17 @@ export function extractReasoningTextFromLine(rawLine: string): string[] {
       if (typeof delta?.reasoning === "string") out.push(delta.reasoning)
     }
 
-    if (parsed.delta?.type === "thinking_delta") {
+    if (
+      (
+        parsed.type === "response.reasoning_summary_text.delta" ||
+        parsed.type === "response.reasoning_text.delta"
+      ) &&
+      typeof parsed.delta === "string"
+    ) {
+      out.push(parsed.delta)
+    }
+
+    if (typeof parsed.delta === "object" && parsed.delta?.type === "thinking_delta") {
       if (typeof parsed.delta.thinking === "string") out.push(parsed.delta.thinking)
       if (typeof parsed.delta.text === "string") out.push(parsed.delta.text)
     }

@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
 import { OutlineGeneratorDialog, type OutlineGeneratorMode } from "@/components/sources/outline-generator-dialog"
 import { PreviewPanel } from "@/components/layout/preview-panel"
-import { clampChatHeight } from "@/lib/workspace-layout"
+import { clampChatHeight, clampChatWidth } from "@/lib/workspace-layout"
 import { runBulkOutlineIngest } from "@/lib/novel/outline-generation"
 import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
 
@@ -18,15 +18,18 @@ export function SourcesView() {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
   const novelMode = useWikiStore((s) => s.novelMode)
+  const chatDockPosition = useWikiStore((s) => s.chatDockPosition)
   const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
   const [outlineDialogOpen, setOutlineDialogOpen] = useState(false)
   const [outlineDialogMode, setOutlineDialogMode] = useState<OutlineGeneratorMode>("outline")
   const [outlineChatOpen, setOutlineChatOpen] = useState(false)
   const [chatHeight, setChatHeight] = useState(300)
+  const [chatWidth, setChatWidth] = useState(360)
   const [bulkIngestRunning, setBulkIngestRunning] = useState(false)
   const [bulkIngestResult, setBulkIngestResult] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const resizingRef = useRef(false)
+  const horizontalResizingRef = useRef(false)
   const bulkIngesting = useMemo(() => (
     project != null && outlineTasks.some((task) => (
       task.projectPath === project.path &&
@@ -55,6 +58,31 @@ export function SourcesView() {
 
     const handleMouseUp = () => {
       resizingRef.current = false
+      document.body.style.cursor = ""
+      document.body.style.userSelect = ""
+      document.removeEventListener("mousemove", handleMouseMove)
+      document.removeEventListener("mouseup", handleMouseUp)
+    }
+
+    document.addEventListener("mousemove", handleMouseMove)
+    document.addEventListener("mouseup", handleMouseUp)
+  }, [])
+
+  const startHorizontalResize = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    horizontalResizingRef.current = true
+    document.body.style.cursor = "col-resize"
+    document.body.style.userSelect = "none"
+
+    const handleMouseMove = (nextEvent: MouseEvent) => {
+      if (!containerRef.current || !horizontalResizingRef.current) return
+      const containerRect = containerRef.current.getBoundingClientRect()
+      const newWidth = containerRect.right - nextEvent.clientX
+      setChatWidth(clampChatWidth(newWidth))
+    }
+
+    const handleMouseUp = () => {
+      horizontalResizingRef.current = false
       document.body.style.cursor = ""
       document.body.style.userSelect = ""
       document.removeEventListener("mousemove", handleMouseMove)
@@ -127,10 +155,27 @@ export function SourcesView() {
       ) : null}
 
       <div className="min-h-0 flex-1 overflow-hidden">
-        <PreviewPanel />
+        {outlineChatOpen && novelMode && chatDockPosition === "right" ? (
+          <div className="flex h-full min-h-0 overflow-hidden">
+            <div className="min-w-0 flex-1 overflow-hidden">
+              <PreviewPanel />
+            </div>
+            <div
+              className="w-1.5 shrink-0 cursor-col-resize bg-border/40 transition-colors hover:bg-primary/30 active:bg-primary/40"
+              onMouseDown={startHorizontalResize}
+            />
+            <div className="h-full min-h-0 shrink-0 overflow-hidden border-l bg-background" style={{ width: chatWidth }}>
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-sm text-muted-foreground">Loading...</div>}>
+                <OutlineChatPanel onClose={() => setOutlineChatOpen(false)} />
+              </Suspense>
+            </div>
+          </div>
+        ) : (
+          <PreviewPanel />
+        )}
       </div>
 
-      {outlineChatOpen && novelMode ? (
+      {outlineChatOpen && novelMode && chatDockPosition === "bottom" ? (
         <>
           <div
             className="h-1.5 shrink-0 cursor-row-resize bg-border/40 transition-colors hover:bg-primary/30 active:bg-primary/40"

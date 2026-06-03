@@ -1,4 +1,4 @@
-import { readFile } from "@/commands/fs"
+import { listDirectory, readFile } from "@/commands/fs"
 import i18n from "@/i18n"
 import { searchWiki, tokenizeQuery } from "@/lib/search"
 import { normalizePath } from "@/lib/path-utils"
@@ -13,6 +13,7 @@ import { buildCharacterAuraContext } from "./character-aura"
 import { isAuthoritativeGenerationPath, isHistoricalProjectionSnippet, novelMixedSearch } from "./search-adapter"
 import { readSoulDoc } from "./soul-doc"
 import { rerankCandidates } from "@/lib/rerank"
+import type { FileNode } from "@/types/wiki"
 
 const SECTION_PRIORITY: Record<string, number> = {
   "当前任务": 1,
@@ -141,7 +142,7 @@ export async function buildContextPack(
 
 export function extractChapterNumberFromTask(task: string): number | undefined {
   const patterns = [
-    /第\s*(\d+)\s*章/i,
+    /\u7b2c\s*(\d+)\s*\u7ae0/i,
     /chapter\s*(\d+)/i,
     /ch\.?\s*(\d+)/i,
   ]
@@ -295,8 +296,94 @@ async function readOutlineContent(pp: string): Promise<string> {
   return ""
 }
 
+function flattenOutlineMarkdownFiles(nodes: FileNode[]): FileNode[] {
+  const files: FileNode[] = []
+  for (const node of nodes) {
+    if (node.is_dir) {
+      if (node.children) files.push(...flattenOutlineMarkdownFiles(node.children))
+      continue
+    }
+    if (node.name.toLowerCase().endsWith(".md")) files.push(node)
+  }
+  return files
+}
+
+function readFrontmatterChapterNumber(content: string): number | undefined {
+  const raw = parseFrontmatter(content).frontmatter?.chapter_number
+  const value = typeof raw === "number" ? raw : typeof raw === "string" ? Number(raw) : NaN
+  return Number.isFinite(value) && value > 0 ? value : undefined
+}
+
+function numberToChineseChapter(value: number): string {
+  const digits = ["零", "一", "二", "三", "四", "五", "六", "七", "八", "九"]
+  if (value <= 10) {
+    if (value === 10) return "十"
+    return digits[value] ?? String(value)
+  }
+  if (value < 20) return `十${digits[value - 10]}`
+  if (value < 100) {
+    const tens = Math.floor(value / 10)
+    const ones = value % 10
+    return `${digits[tens]}十${ones === 0 ? "" : digits[ones]}`
+  }
+  if (value < 1000) {
+    const hundreds = Math.floor(value / 100)
+    const rest = value % 100
+    if (rest === 0) return `${digits[hundreds]}百`
+    if (rest < 10) return `${digits[hundreds]}百零${digits[rest]}`
+    return `${digits[hundreds]}百${numberToChineseChapter(rest)}`
+  }
+  return String(value)
+}
+
+function chapterLabels(chapterNumber: number): string[] {
+  return [`第${chapterNumber}章`, `第${numberToChineseChapter(chapterNumber)}章`]
+}
+
+function includesChapterMarker(text: string, chapterNumber: number): boolean {
+  const compact = text.replace(/\s+/g, "")
+  return chapterLabels(chapterNumber).some((label) => compact.includes(label)) ||
+    new RegExp(`chapter\\s*${chapterNumber}\\b`, "i").test(text)
+}
+
+export function pickChapterOutlineByNumber(
+  candidates: Array<{ path: string; content: string }>,
+  chapterNumber: number,
+): string {
+  const frontmatterMatch = candidates.find((candidate) => readFrontmatterChapterNumber(candidate.content) === chapterNumber)
+  if (frontmatterMatch) return frontmatterMatch.content.slice(0, 4000)
+
+  const headingMatch = candidates.find((candidate) =>
+    includesChapterMarker(candidate.content, chapterNumber) || includesChapterMarker(candidate.path, chapterNumber),
+  )
+  if (headingMatch) return headingMatch.content.slice(0, 4000)
+
+  return ""
+}
+
+async function readChapterOutlineDirect(pp: string, chapterNumber: number): Promise<string> {
+  try {
+    const tree = await listDirectory(`${pp}/wiki/outlines`)
+    const files = flattenOutlineMarkdownFiles(tree)
+    const candidates = await Promise.all(
+      files.slice(0, 80).map(async (file) => ({
+        path: file.path,
+        content: await readFile(file.path).catch(() => ""),
+      })),
+    )
+    return pickChapterOutlineByNumber(
+      candidates.filter((candidate) => candidate.content.trim()),
+      chapterNumber,
+    )
+  } catch {
+    return ""
+  }
+}
+
 async function readChapterOutlineContent(pp: string, chapterNumber?: number): Promise<string> {
   if (!chapterNumber) return ""
+  const direct = await readChapterOutlineDirect(pp, chapterNumber)
+  if (direct.trim()) return direct
   const queries = [
     `第${chapterNumber}章细纲 outline`,
     `chapter ${chapterNumber} outline`,
@@ -770,14 +857,26 @@ async function searchGraphRelevantContent(
   }
 }
 
-function extractChapterGoal(outline: string, chapterNumber?: number): string {
+export function extractChapterGoal(outline: string, chapterNumber?: number): string {
   if (!chapterNumber || !outline) return ""
-  const chapterPattern = new RegExp(`第\\s*${chapterNumber}\\s*章[：:]?(.+)`, "m")
-  const match = outline.match(chapterPattern)
-  if (match) return match[1].trim()
-  const chPattern = new RegExp(`Chapter\\s*${chapterNumber}[：:]?(.+)`, "mi")
-  const chMatch = outline.match(chPattern)
-  if (chMatch) return chMatch[1].trim()
+  const cleaned = outline.replace(/^---[\s\S]*?---\s*/m, "").trim()
+  for (const line of cleaned.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const compact = trimmed.replace(/\s+/g, "")
+    for (const label of chapterLabels(chapterNumber)) {
+      if (compact.includes(label)) {
+        const escapedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+        const rest = trimmed.replace(new RegExp(`^#*\\s*${escapedLabel}[：:、\\s-]*`), "").trim()
+        return (rest || cleaned).slice(0, 2500)
+      }
+    }
+    const englishMatch = trimmed.match(new RegExp(`^#*\\s*Chapter\\s*${chapterNumber}[：:\\s-]*(.+)?$`, "i"))
+    if (englishMatch) {
+      return ((englishMatch[1] ?? "").trim() || cleaned).slice(0, 2500)
+    }
+  }
+  if (includesChapterMarker(cleaned, chapterNumber)) return cleaned.slice(0, 2500)
   return ""
 }
 

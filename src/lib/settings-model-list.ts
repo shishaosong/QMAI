@@ -67,6 +67,9 @@ function buildEndpointModelsUrl(endpoint: string): string {
   if (/\/chat\/completions(?:\?.*)?$/i.test(trimmed)) {
     return trimmed.replace(/\/chat\/completions(?:\?.*)?$/i, "/models")
   }
+  if (/\/responses(?:\?.*)?$/i.test(trimmed)) {
+    return trimmed.replace(/\/responses(?:\?.*)?$/i, "/models")
+  }
   if (/\/messages(?:\?.*)?$/i.test(trimmed)) {
     return trimmed.replace(/\/messages(?:\?.*)?$/i, "/models")
   }
@@ -79,12 +82,8 @@ function buildEndpointModelsUrl(endpoint: string): string {
   return `${trimmed.replace(/\/+$/, "")}/models`
 }
 
-function withCurrentModel(models: string[], currentModel: string): LlmModelListResult {
-  const result = uniqueSortedModels(models)
-  if (currentModel.trim()) {
-    return { models: uniqueSortedModels([currentModel.trim(), ...result]) }
-  }
-  return { models: result }
+function toModelListResult(models: string[]): LlmModelListResult {
+  return { models: uniqueSortedModels(models) }
 }
 
 function buildModelsUrl(config: LlmConfig): { url: string; headers: Record<string, string> } {
@@ -111,6 +110,8 @@ function buildModelsUrl(config: LlmConfig): { url: string; headers: Record<strin
 
   if (/\/chat\/completions(?:\?.*)?$/i.test(url)) {
     modelsUrl = url.replace(/\/chat\/completions(?:\?.*)?$/i, "/models")
+  } else if (/\/responses(?:\?.*)?$/i.test(url)) {
+    modelsUrl = url.replace(/\/responses(?:\?.*)?$/i, "/models")
   } else if (/\/messages(?:\?.*)?$/i.test(url)) {
     modelsUrl = url.replace(/\/messages(?:\?.*)?$/i, "/models")
   } else if (/\/rerank(?:\?.*)?$/i.test(url)) {
@@ -123,7 +124,7 @@ function buildModelsUrl(config: LlmConfig): { url: string; headers: Record<strin
   return { url: modelsUrl, headers }
 }
 
-async function fetchModelList(url: string, headers: Record<string, string>, currentModel: string): Promise<LlmModelListResult> {
+async function fetchModelList(url: string, headers: Record<string, string>, _currentModel: string): Promise<LlmModelListResult> {
   const httpFetch = await getHttpFetch()
   const response = await httpFetch(url, {
     method: "GET",
@@ -135,7 +136,7 @@ async function fetchModelList(url: string, headers: Record<string, string>, curr
     throw new Error(`模型列表拉取失败：HTTP ${response.status}${text ? ` ${text.slice(0, 200)}` : ""}`)
   }
 
-  return withCurrentModel(parseModelListResponse(await response.json()), currentModel)
+  return toModelListResult(parseModelListResponse(await response.json()))
 }
 
 export async function fetchLlmModelList(config: LlmConfig): Promise<LlmModelListResult> {
@@ -148,7 +149,7 @@ export async function fetchLlmModelList(config: LlmConfig): Promise<LlmModelList
   const { url, headers } = buildModelsUrl(config)
   const result = await fetchModelList(url, headers, config.model)
   if (config.provider === "google") {
-    return withCurrentModel(result.models.map((model) => model.replace(/^models\//, "")), config.model)
+    return toModelListResult(result.models.map((model) => model.replace(/^models\//, "")))
   }
   return result
 }
@@ -168,7 +169,7 @@ export async function fetchEmbeddingModelList(config: EmbeddingConfig): Promise<
 
   const result = await fetchModelList(url, headers, config.model)
   if (isGoogle) {
-    return withCurrentModel(result.models.map((model) => model.replace(/^models\//, "")), config.model)
+    return toModelListResult(result.models.map((model) => model.replace(/^models\//, "")))
   }
   return result
 }

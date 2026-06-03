@@ -9,6 +9,12 @@ import { hasUsableLlm } from "@/lib/has-usable-llm"
 import ReactMarkdown from "react-markdown"
 import { useState } from "react"
 import { FileEditPreview } from "@/components/chat/file-edit-preview"
+import { ChatDockControls } from "@/components/chat/chat-dock-controls"
+import { OUTLINE_SECTION_GENERATION_CONFIGS } from "@/lib/novel/outline-generation"
+import { prepareOutlineSaveDraft } from "@/lib/outline-save"
+import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
+import { runDeepOutlineGeneration } from "@/lib/novel/deep-outline-generation"
+import { createDeepThinkingStreamRenderer } from "@/lib/deep-thinking-stream"
 
 async function loadOutlineContext(projectPath: string): Promise<{ context: string; sources: string[] }> {
   const pp = normalizePath(projectPath)
@@ -47,18 +53,6 @@ async function loadOutlineContext(projectPath: string): Promise<{ context: strin
   return { context: sections.join("\n\n---\n\n"), sources }
 }
 
-async function generateOutlineTitle(content: string): Promise<string> {
-  const lines = content.split("\n").filter(l => l.trim())
-  for (const line of lines.slice(0, 5)) {
-    const headingMatch = line.match(/^#+\s+(.+)/)
-    if (headingMatch) return headingMatch[1].trim().slice(0, 20)
-    if (line.length > 2 && line.length < 30 && !line.startsWith("-") && !line.startsWith("*")) {
-      return line.trim().slice(0, 20)
-    }
-  }
-  return `AI大纲-${new Date().toISOString().slice(0, 10)}`
-}
-
 async function getUniqueOutlinePath(outlinesDir: string, title: string): Promise<string> {
   const fileName = `${title}.md`
   const firstPath = `${outlinesDir}/${fileName}`
@@ -68,6 +62,41 @@ async function getUniqueOutlinePath(outlinesDir: string, title: string): Promise
     if (!(await fileExists(candidate))) return candidate
   }
   return `${outlinesDir}/${title}-${Date.now()}.md`
+}
+
+function separateThinking(text: string): { thinking: string | null; answer: string } {
+  const thinkParts: string[] = []
+  let answer = text.replace(/<(think|thinking)>([\s\S]*?)<\/\1>/gi, (_match, _tag, inner) => {
+    thinkParts.push(String(inner).trim())
+    return ""
+  })
+
+  const openMatch = answer.match(/<(think|thinking)>([\s\S]*)$/i)
+  if (openMatch && openMatch.index !== undefined) {
+    thinkParts.push(openMatch[2].trim())
+    answer = answer.slice(0, openMatch.index)
+  }
+
+  return {
+    thinking: thinkParts.length > 0 ? thinkParts.filter(Boolean).join("\n\n") : null,
+    answer: answer.trim(),
+  }
+}
+
+function OutlineThinkingBlock({ content, open }: { content: string; open: boolean }) {
+  const lines = content.split("\n").filter((line) => line.trim())
+  return (
+    <div className="mb-2 rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 px-3 py-2 text-xs dark:bg-amber-950/20">
+      <div className="mb-1.5 flex items-center gap-1.5 text-amber-700 dark:text-amber-400">
+        <span className={open ? "animate-pulse" : undefined}>💭</span>
+        <span className="font-medium">{open ? "思考中..." : "思考过程"}</span>
+        <span className="text-[10px] text-amber-600/60 dark:text-amber-500/60">{lines.length} 行</span>
+      </div>
+      <div className="max-h-72 overflow-y-auto border-t border-amber-500/20 pt-2 pr-1 whitespace-pre-wrap break-words font-mono leading-5 text-amber-800/80 dark:text-amber-300/70">
+        {content}
+      </div>
+    </div>
+  )
 }
 
 function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, activeMessagesLength, copied, projectPath, onSaveAsOutline, onCopy, onRegenerate }: {
@@ -87,13 +116,15 @@ function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, ac
   const [editDismissed, setEditDismissed] = useState(false)
 
   const displayContent = msg.content || (isStreaming && index === activeMessagesLength - 1 ? streamingContent : "")
+  const { thinking, answer } = useMemo(() => separateThinking(displayContent), [displayContent])
+  const actionContent = answer || displayContent
 
   // Parse for file edits
   const parsed = useMemo(() => {
-    if (!displayContent) return { textContent: "", edits: [], hasEdits: false }
+    if (!answer) return { textContent: "", edits: [], hasEdits: false }
     const { parseAgentResponse } = require("@/lib/novel/agent-parser") as typeof import("@/lib/novel/agent-parser")
-    return parseAgentResponse(displayContent)
-  }, [displayContent])
+    return parseAgentResponse(answer)
+  }, [answer])
 
   const handleApplyEdits = useCallback(async (edits: import("@/lib/novel/agent-parser").FileEditAction[]) => {
     if (!projectPath) return []
@@ -111,8 +142,9 @@ function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, ac
 
   return (
     <>
+      {thinking ? <OutlineThinkingBlock content={thinking} open={isStreaming} /> : null}
       <div className="prose prose-sm dark:prose-invert max-w-none">
-        <ReactMarkdown>{parsed.textContent || displayContent}</ReactMarkdown>
+        <ReactMarkdown>{parsed.textContent || answer}</ReactMarkdown>
       </div>
       {/* File edit preview */}
       {parsed.hasEdits && !editDismissed && projectPath && !isStreaming ? (
@@ -137,12 +169,12 @@ function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, ac
         </details>
       ) : null}
       {/* Action buttons */}
-      {msg.content && !isStreaming ? (
+      {actionContent && !isStreaming ? (
         <div className="mt-2 flex gap-2 border-t pt-2">
-          <button onClick={() => void onSaveAsOutline(msg.content)} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent">
+          <button onClick={() => void onSaveAsOutline(actionContent)} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent">
             <Save className="h-3 w-3" /> 保存为大纲
           </button>
-          <button onClick={() => onCopy(msg.content, msg.id)} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent">
+          <button onClick={() => onCopy(actionContent, msg.id)} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent">
             <Copy className="h-3 w-3" /> {copied === msg.id ? "已复制" : "复制"}
           </button>
           <button onClick={() => void onRegenerate(index)} disabled={isStreaming} className="inline-flex items-center gap-1 rounded border px-2 py-0.5 text-xs hover:bg-accent disabled:opacity-50">
@@ -217,8 +249,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
     return () => container.removeEventListener("scroll", handleScroll)
   }, [])
 
-  const handleSend = useCallback(async () => {
-    if (!input.trim() || !project || isStreaming) return
+  const handleSend = useCallback(async (overrideInput?: string) => {
+    const prompt = (overrideInput ?? input).trim()
+    if (!prompt || !project || isStreaming) return
     if (!hasUsableLlm(llmConfig)) return
 
     let convId = activeConversationId
@@ -226,9 +259,9 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       convId = createConversation()
     }
 
-    const userMsg: OutlineChatMessage = { id: crypto.randomUUID(), role: "user", content: input.trim() }
+    const userMsg: OutlineChatMessage = { id: crypto.randomUUID(), role: "user", content: prompt }
     addMessage(convId, userMsg)
-    setInput("")
+    if (!overrideInput) setInput("")
     setIsStreaming(true)
     setStreamingContent("")
     userScrolledUpRef.current = false
@@ -239,7 +272,7 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       // Agent mode: detect edit intent and add file edit instructions
       const { detectEditIntent, buildAgentSystemSuffix } = await import("@/lib/novel/agent-parser")
-      const hasEditIntent = detectEditIntent(input.trim())
+      const hasEditIntent = detectEditIntent(prompt)
       const agentSuffix = hasEditIntent ? buildAgentSystemSuffix("outlines") : ""
       let fileListStr = ""
       if (hasEditIntent) {
@@ -250,28 +283,75 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
           : "\n\n## 当前大纲文件列表\n(暂无大纲文件)"
       }
 
-      const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。\n\n${context}${agentSuffix}${fileListStr}`
-
-      const chatMessages: ChatMessage[] = [
-        { role: "system", content: systemPrompt },
-        ...allMsgs.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
-      ]
-
+      const historyMessages: ChatMessage[] = allMsgs.map(m => ({ role: m.role as "user" | "assistant", content: m.content }))
       let result = ""
+      const appendToResult = (token: string) => {
+        result += token
+        setStreamingContent(result)
+      }
+      const deepStream = createDeepThinkingStreamRenderer()
+      const updateDeepResult = (content: string) => {
+        result = content
+        setStreamingContent(result)
+      }
+      const appendThinkingBlock = (content: string) => updateDeepResult(deepStream.updateThinking(content))
       const controller = new AbortController()
       abortRef.current = controller
 
       // Add placeholder assistant message
       addMessage(convId, { id: crypto.randomUUID(), role: "assistant", content: "", sources })
 
-      await streamChat(llmConfig, chatMessages, {
-        onToken: (token) => {
-          result += token
-          setStreamingContent(result)
-        },
-        onDone: () => {},
-        onError: () => {},
-      }, controller.signal)
+      if (hasEditIntent) {
+        const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。\n\n${context}${agentSuffix}${fileListStr}`
+        const chatMessages: ChatMessage[] = [
+          { role: "system", content: systemPrompt },
+          ...historyMessages,
+        ]
+
+        let thinkingOpen = false
+        const appendReasoning = (token: string) => {
+          if (!token) return
+          if (!thinkingOpen) {
+            thinkingOpen = true
+            appendToResult("<think>")
+          }
+          appendToResult(token)
+        }
+        const closeReasoning = () => {
+          if (!thinkingOpen) return
+          thinkingOpen = false
+          appendToResult("</think>")
+        }
+
+        await streamChat(llmConfig, chatMessages, {
+          onToken: (token) => {
+            closeReasoning()
+            appendToResult(token)
+          },
+          onReasoningToken: appendReasoning,
+          onDone: () => {
+            closeReasoning()
+          },
+          onError: () => {
+            closeReasoning()
+          },
+        }, controller.signal, { reasoning: resolveUserVisibleReasoning(llmConfig.reasoning) })
+      } else {
+        await runDeepOutlineGeneration(
+          {
+            llmConfig,
+            userRequest: prompt,
+            context,
+            historyMessages,
+          },
+          {
+            onThinking: appendThinkingBlock,
+            onFinalContent: (content) => updateDeepResult(deepStream.appendFinal(content)),
+          },
+          undefined,
+          controller.signal,
+        )
+      }
 
       replaceLastAssistant(convId, result, sources)
       setStreamingContent("")
@@ -289,6 +369,10 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       abortRef.current = null
     }
   }, [input, project, isStreaming, llmConfig, activeConversationId, createConversation, addMessage, replaceLastAssistant, removeLastMessage, setIsStreaming, setStreamingContent])
+
+  const handleGenerateSection = useCallback((title: string, requestHint: string) => {
+    void handleSend(`请继续生成「${title}」。${requestHint} 请基于已有大纲、章节内容和项目记忆直接输出该分项内容，结构清晰，可保存为大纲。`)
+  }, [handleSend])
 
   const handleStop = useCallback(() => {
     abortRef.current?.abort()
@@ -324,27 +408,37 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
     try {
       const { context, sources } = await loadOutlineContext(project.path)
-      const systemPrompt = `你是一个专业的小说大纲编辑助手。以下是当前小说的大纲和章节内容，请根据用户的问题进行大纲相关的讨论和创作。\n\n${context}`
-
       const chatMessages: ChatMessage[] = [
-        { role: "system", content: systemPrompt },
         ...targetMessages.map(m => ({ role: m.role as "user" | "assistant", content: m.content })),
       ]
+      const lastUserRequest = [...targetMessages].reverse().find((message) => message.role === "user")?.content ?? "请基于已有大纲重新生成。"
 
       let result = ""
+      const deepStream = createDeepThinkingStreamRenderer()
+      const updateDeepResult = (content: string) => {
+        result = content
+        setStreamingContent(result)
+      }
+      const appendThinkingBlock = (content: string) => updateDeepResult(deepStream.updateThinking(content))
       const controller = new AbortController()
       abortRef.current = controller
 
       addMessage(activeConversationId, { id: crypto.randomUUID(), role: "assistant", content: "", sources })
 
-      await streamChat(llmConfig, chatMessages, {
-        onToken: (token) => {
-          result += token
-          setStreamingContent(result)
+      await runDeepOutlineGeneration(
+        {
+          llmConfig,
+          userRequest: lastUserRequest,
+          context,
+          historyMessages: chatMessages,
         },
-        onDone: () => {},
-        onError: () => {},
-      }, controller.signal)
+        {
+          onThinking: appendThinkingBlock,
+          onFinalContent: (content) => updateDeepResult(deepStream.appendFinal(content)),
+        },
+        undefined,
+        controller.signal,
+      )
 
       replaceLastAssistant(activeConversationId, result, sources)
       setStreamingContent("")
@@ -372,10 +466,16 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
       const pp = normalizePath(project.path)
       const outlinesDir = `${pp}/wiki/outlines`
       await createDirectory(outlinesDir)
-      const title = await generateOutlineTitle(content)
-      const outlinePath = await getUniqueOutlinePath(outlinesDir, title)
-      const fileName = outlinePath.split("/").pop()?.replace(/\.md$/, "") ?? title
-      const mdContent = `---\ntype: outline\ntitle: "${fileName}"\n---\n\n# ${fileName}\n\n${content}\n`
+      const existingFiles = await listDirectory(outlinesDir).catch(() => [])
+      const existingTitles = existingFiles
+        .filter((file) => file.name.endsWith(".md"))
+        .map((file) => file.name.replace(/\.md$/i, "").trim())
+        .filter(Boolean)
+      const draft = prepareOutlineSaveDraft(content, existingTitles)
+      const outlinePath = await getUniqueOutlinePath(outlinesDir, draft.title)
+      const fileName = outlinePath.split("/").pop()?.replace(/\.md$/, "") ?? draft.title
+      const body = draft.content.replace(/^#\s+.+(?:\r?\n){1,2}/, "").trim()
+      const mdContent = `---\ntype: outline\ntitle: "${fileName}"\n---\n\n# ${fileName}\n\n${body}\n`
       await writeFile(outlinePath, mdContent)
       const tree = await listDirectory(pp)
       useWikiStore.getState().setFileTree(tree)
@@ -468,7 +568,21 @@ export function OutlineChatPanel({ onClose }: { onClose: () => void }) {
 
       {/* Input */}
       <div className="border-t px-3 py-2">
-        <div className="flex gap-2">
+        <div className="mb-2 flex flex-wrap gap-1.5">
+          {OUTLINE_SECTION_GENERATION_CONFIGS.map((config) => (
+            <button
+              key={config.key}
+              type="button"
+              onClick={() => handleGenerateSection(config.title, config.requestHint)}
+              disabled={isStreaming}
+              className="rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:opacity-50"
+            >
+              {config.title}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2">
+          <ChatDockControls />
           <input
             type="text"
             value={input}

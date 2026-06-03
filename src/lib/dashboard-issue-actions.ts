@@ -191,9 +191,9 @@ export function parseFactCheckInsertPlan(raw: string): DashboardFactCheckInsertP
     .trim()
   if (!cleaned) return null
   try {
-    const parsed = JSON.parse(cleaned) as Partial<Record<keyof DashboardFactCheckInsertPlan, unknown>>
-    const anchorText = String(parsed.anchorText || "").trim()
-    const insertText = String(parsed.insertText || "").trim()
+    const parsed = JSON.parse(cleaned) as Record<string, unknown>
+    const anchorText = String(parsed.anchorText || parsed.anchor_text || "").trim()
+    const insertText = String(parsed.insertText || parsed.insert_text || "").trim()
     if (!anchorText || !insertText) return null
     return { anchorText, insertText }
   } catch {

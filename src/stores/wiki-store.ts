@@ -3,6 +3,7 @@ import type { WikiProject, FileNode } from "@/types/wiki"
 import { DEFAULT_SOURCE_WATCH_CONFIG } from "@/lib/source-watch-config"
 import type { LintResult } from "@/lib/lint"
 import type { NovelReviewResult } from "@/lib/novel/review-adapter"
+import type { DimensionReviewResult, SixReviewDimensionKey } from "@/lib/novel/dimension-review-adapter"
 import type { TrashItem } from "@/lib/trash"
 
 const GRAPH_LABEL_MODE_KEY = "lk-graph-label-display-mode"
@@ -10,6 +11,15 @@ const GRAPH_EDGE_COLOR_KEY = "lk-graph-edge-color"
 const GRAPH_EDGE_STRENGTH_KEY = "lk-graph-edge-strength"
 const GRAPH_EDGE_STYLE_KEY = "lk-graph-edge-style"
 const GRAPH_EDGE_LABELS_ALWAYS_KEY = "lk-graph-edge-labels-always"
+const CHAT_DOCK_POSITION_KEY = "qmai-chat-dock-position"
+
+export type ChatDockPosition = "bottom" | "right"
+
+const readStoredChatDockPosition = (): ChatDockPosition => {
+  if (typeof localStorage === "undefined") return "bottom"
+  const saved = localStorage.getItem(CHAT_DOCK_POSITION_KEY)
+  return saved === "right" || saved === "bottom" ? saved : "bottom"
+}
 
 const readStoredGraphLabelDisplayMode = (): string => {
   if (typeof localStorage === "undefined") return "all"
@@ -46,7 +56,7 @@ const readStoredGraphEdgeLabelsAlways = (): boolean => {
  * etc.), so this field is ignored for them. `undefined` defaults to
  * `chat_completions` for backward compatibility with pre-0.3.7 configs.
  */
-export type CustomApiMode = "chat_completions" | "anthropic_messages"
+export type CustomApiMode = "chat_completions" | "responses" | "anthropic_messages"
 export type ReasoningMode = "auto" | "off" | "low" | "medium" | "high" | "max" | "custom"
 
 export interface ReasoningConfig {
@@ -328,6 +338,7 @@ export type FinalChapterSavePhase =
   | "saving"
   | "reviewing"
   | "saved"
+  | "reingesting"
   | "ingested"
   | "blocked_by_review"
   | "ingest_failed"
@@ -352,6 +363,11 @@ export interface LintRunState extends AsyncTaskState {
 
 export interface ReviewRunState extends AsyncTaskState {
   results: NovelReviewResult[]
+  thinking?: string
+  dimensionResults?: Partial<Record<SixReviewDimensionKey, DimensionReviewResult>>
+  dimensionThinking?: Partial<Record<SixReviewDimensionKey, string>>
+  activeDimension?: SixReviewDimensionKey
+  dimensionProgress?: string
 }
 
 export interface PendingEditorHighlight {
@@ -387,6 +403,7 @@ interface WikiState {
   pendingScrollImageSrc: string | null
   selectedMemoryCenterEntry: string | null
   chatExpanded: boolean
+  chatDockPosition: ChatDockPosition
   searchPanelOpen: boolean
   activeView: "wiki" | "sources" | "search" | "graph" | "lint" | "soul" | "settings" | "trash" | "reviewCenter"
   activeSettingsCategory: "usage-guide" | null
@@ -394,6 +411,7 @@ interface WikiState {
   selectedSoulTab: "project" | "character"
   selectedSoulSection: "builtIn" | "custom"
   selectedReviewDimension: string | null
+  selectedReviewFilePath: string
   graphMode: string
   graphDisplayMode: string
   graphColorMode: string
@@ -440,6 +458,7 @@ interface WikiState {
   setPendingScrollImageSrc: (src: string | null) => void
   setSelectedMemoryCenterEntry: (entry: string | null) => void
   setChatExpanded: (expanded: boolean) => void
+  setChatDockPosition: (position: ChatDockPosition) => void
   setSearchPanelOpen: (open: boolean) => void
   setActiveView: (view: WikiState["activeView"]) => void
   setActiveSettingsCategory: (category: "usage-guide" | null) => void
@@ -447,6 +466,7 @@ interface WikiState {
   setSelectedSoulTab: (tab: "project" | "character") => void
   setSelectedSoulSection: (section: "builtIn" | "custom") => void
   setSelectedReviewDimension: (dimension: string | null) => void
+  setSelectedReviewFilePath: (path: string) => void
   setGraphMode: (mode: string) => void
   setGraphDisplayMode: (mode: string) => void
   setGraphColorMode: (mode: string) => void
@@ -496,6 +516,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   pendingScrollImageSrc: null,
   selectedMemoryCenterEntry: null,
   chatExpanded: false,
+  chatDockPosition: readStoredChatDockPosition(),
   searchPanelOpen: false,
   activeView: "wiki",
   activeSettingsCategory: null,
@@ -503,6 +524,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   selectedSoulTab: "project",
   selectedSoulSection: "builtIn",
   selectedReviewDimension: null,
+  selectedReviewFilePath: "",
   graphMode: "overview",
   graphDisplayMode: "graph",
   graphColorMode: "type",
@@ -538,6 +560,12 @@ export const useWikiStore = create<WikiState>((set) => ({
   setPendingScrollImageSrc: (pendingScrollImageSrc) => set({ pendingScrollImageSrc }),
   setSelectedMemoryCenterEntry: (selectedMemoryCenterEntry) => set({ selectedMemoryCenterEntry }),
   setChatExpanded: (chatExpanded) => set({ chatExpanded }),
+  setChatDockPosition: (chatDockPosition) => {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(CHAT_DOCK_POSITION_KEY, chatDockPosition)
+    }
+    set({ chatDockPosition })
+  },
   setSearchPanelOpen: (searchPanelOpen) => set({ searchPanelOpen }),
   setActiveView: (activeView) => set({ activeView }),
   setActiveSettingsCategory: (activeSettingsCategory) => set({ activeSettingsCategory }),
@@ -545,6 +573,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   setSelectedSoulTab: (selectedSoulTab) => set({ selectedSoulTab }),
   setSelectedSoulSection: (selectedSoulSection) => set({ selectedSoulSection }),
   setSelectedReviewDimension: (selectedReviewDimension) => set({ selectedReviewDimension }),
+  setSelectedReviewFilePath: (selectedReviewFilePath) => set({ selectedReviewFilePath }),
   setGraphMode: (graphMode) => set({ graphMode }),
   setGraphDisplayMode: (graphDisplayMode) => set({ graphDisplayMode }),
   setGraphColorMode: (graphColorMode) => set({ graphColorMode }),

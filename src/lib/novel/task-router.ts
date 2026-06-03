@@ -41,8 +41,10 @@ const INTENT_PATTERNS: IntentPattern[] = [
       /^(开始|帮我)(写|创作|生成)\s*(第\s*\d+\s*章|章节)/,
       /生成\s*(第\s*\d+\s*章|新的?一?章)/,
       /写\s*第\s*\d+\s*章/,
+      /(根据|按照).*(第\s*[\d一二三四五六七八九十百〇零两]+\s*章).*(章纲|大纲|细纲).*(生成|写|创作|撰写).*(正文|章节)?/,
+      /(根据|按照).*(章纲|大纲|细纲).*(生成|写|创作|撰写).*(正文|章节)/,
     ],
-    keywords: ["写章节", "生成章节", "创作章节", "新章节", "写第"],
+    keywords: ["写章节", "生成章节", "创作章节", "新章节", "写第", "章纲生成正文"],
     weight: 10,
   },
   {
@@ -50,9 +52,10 @@ const INTENT_PATTERNS: IntentPattern[] = [
     patterns: [
       /^(继续|续写|接着写|往下写)/,
       /(继续|续)(写|创作)\s*(第\s*\d+\s*章|当前|这一?章|下去)/,
+      /继续\s*(生成|写|创作|撰写)\s*(第\s*[\d一二三四五六七八九十百〇零两]+\s*章|下一章|当前|这一?章|正文|章节)?/,
       /接着(写|往下)/,
     ],
-    keywords: ["续写", "继续写", "接着写", "往下写", "继续创作"],
+    keywords: ["续写", "继续写", "继续生成", "接着写", "往下写", "继续创作"],
     weight: 12,
   },
   {
@@ -171,6 +174,7 @@ const INTENT_PATTERNS: IntentPattern[] = [
 
 const CHAPTER_NUMBER_PATTERNS = [
   /第\s*(\d+)\s*章/,
+  /第\s*([一二三四五六七八九十百〇零两]+)\s*章/,
   /chapter\s*(\d+)/i,
   /ch\.?\s*(\d+)/i,
 ]
@@ -235,11 +239,52 @@ function extractChapterNumber(text: string): number | undefined {
   for (const pattern of CHAPTER_NUMBER_PATTERNS) {
     const match = text.match(pattern)
     if (match) {
-      const num = Number(match[1])
+      const num = /^\d+$/.test(match[1])
+        ? Number(match[1])
+        : parseChineseChapterNumber(match[1])
       if (Number.isFinite(num) && num > 0) return num
     }
   }
   return undefined
+}
+
+function parseChineseChapterNumber(text: string): number {
+  const normalized = text.replace(/两/g, "二").replace(/〇/g, "零")
+  const digitMap: Record<string, number> = {
+    零: 0,
+    一: 1,
+    二: 2,
+    三: 3,
+    四: 4,
+    五: 5,
+    六: 6,
+    七: 7,
+    八: 8,
+    九: 9,
+  }
+
+  if (!/[十百]/.test(normalized)) {
+    const digits = [...normalized].map((char) => digitMap[char])
+    if (digits.some((digit) => digit === undefined)) return NaN
+    return Number(digits.join(""))
+  }
+
+  let total = 0
+  let current = 0
+  for (const char of normalized) {
+    if (char === "百") {
+      total += (current || 1) * 100
+      current = 0
+    } else if (char === "十") {
+      total += (current || 1) * 10
+      current = 0
+    } else if (digitMap[char] !== undefined) {
+      current = digitMap[char]
+    } else {
+      return NaN
+    }
+  }
+  return total + current
 }
 
 /**

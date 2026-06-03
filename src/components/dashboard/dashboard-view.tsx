@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react"
+import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
 import { readFile, writeFile } from "@/commands/fs"
@@ -23,7 +23,6 @@ import { TextTransformPreviewDialog } from "@/components/novel/text-transform-pr
 import { streamChat } from "@/lib/llm-client"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
 import {
-  applyDashboardInsertBeforeToMarkdown,
   applyDashboardRewriteToMarkdown,
   buildFactCheckInsertMessages,
   buildDashboardRewriteMessages,
@@ -70,6 +69,22 @@ const SEVERITY_CONFIG: Record<DashSeverity, { icon: typeof AlertTriangle; labelK
   low: { icon: Info, labelKey: "dashboard.severity.low", color: "text-blue-600 dark:text-blue-400", bgColor: "border-blue-300 bg-blue-50 dark:border-blue-900/70 dark:bg-blue-950/30" },
 }
 
+const FACT_CHECK_TYPE_LABELS: Record<FactCheckResult["type"], string> = {
+  character_jump: "人物状态跳变",
+  location_conflict: "地点冲突",
+  item_holder_change: "物品持有变化",
+  org_flip: "组织立场变化",
+  timeline_conflict: "时间线冲突",
+  setting_conflict: "设定冲突",
+  relationship_reversal: "关系反转",
+  causality_break: "因果断裂",
+}
+
+const DEBT_LEVEL_LABELS: Record<"critical" | "warning", string> = {
+  critical: "严重",
+  warning: "警告",
+}
+
 function mapReviewSeverity(severity: NovelReviewResult["severity"]): DashSeverity {
   switch (severity) {
     case "error": return "high"
@@ -105,7 +120,18 @@ function extractChapterNumberFromTargetPath(targetPath: string | null | undefine
   return Number.parseInt(match[1], 10)
 }
 
-export function DashboardView() {
+function formatDashItemDetail(item: DashItem): string {
+  if (item.source === "factcheck" && item.detail in FACT_CHECK_TYPE_LABELS) {
+    return FACT_CHECK_TYPE_LABELS[item.detail as FactCheckResult["type"]]
+  }
+  return item.detail
+}
+
+interface DashboardViewProps {
+  headerActions?: ReactNode
+}
+
+export function DashboardView({ headerActions }: DashboardViewProps = {}) {
   const { t } = useTranslation()
   const project = useWikiStore((s) => s.project)
   const reviewRun = useWikiStore((s) => s.reviewRun)
@@ -378,7 +404,7 @@ export function DashboardView() {
                   ...current,
                   anchor,
                   sourceContent: anchor.selection.text,
-                  candidateContent: plan.insertText,
+                  candidateContent: `${plan.insertText.trim()}\n${anchor.selection.text}`,
                 }
               }
 
@@ -415,34 +441,22 @@ export function DashboardView() {
     const latestMarkdown = await readFile(rewriteDialog.targetPath).catch(() => "")
     if (!latestMarkdown) return
 
-    let nextMarkdown = rewriteDialog.mode === "insert_before"
-      ? applyDashboardInsertBeforeToMarkdown(
-        latestMarkdown,
-        rewriteDialog.anchor,
-        rewriteDialog.candidateContent,
-      )
-      : applyDashboardRewriteToMarkdown(
-        latestMarkdown,
-        rewriteDialog.anchor,
-        rewriteDialog.candidateContent,
-      )
+    let nextMarkdown = applyDashboardRewriteToMarkdown(
+      latestMarkdown,
+      rewriteDialog.anchor,
+      rewriteDialog.candidateContent,
+    )
     if (!nextMarkdown) {
       const refreshedAnchor = findChapterSelectionByEvidence(
         latestMarkdown,
         [rewriteDialog.sourceContent, rewriteDialog.anchor.evidence],
       )
       if (!refreshedAnchor) return
-      nextMarkdown = rewriteDialog.mode === "insert_before"
-        ? applyDashboardInsertBeforeToMarkdown(
-          latestMarkdown,
-          refreshedAnchor,
-          rewriteDialog.candidateContent,
-        )
-        : applyDashboardRewriteToMarkdown(
-          latestMarkdown,
-          refreshedAnchor,
-          rewriteDialog.candidateContent,
-        )
+      nextMarkdown = applyDashboardRewriteToMarkdown(
+        latestMarkdown,
+        refreshedAnchor,
+        rewriteDialog.candidateContent,
+      )
       if (!nextMarkdown) return
     }
 
@@ -462,9 +476,7 @@ export function DashboardView() {
       targetPath: rewriteDialog.targetPath,
       evidence: rewriteDialog.anchor.evidence,
       originalText: rewriteDialog.sourceContent,
-      replacementText: rewriteDialog.mode === "insert_before"
-        ? `${rewriteDialog.candidateContent.trim()}\n${rewriteDialog.sourceContent}`
-        : rewriteDialog.candidateContent,
+      replacementText: rewriteDialog.candidateContent,
       updatedAt: new Date().toISOString(),
     }
 
@@ -509,6 +521,22 @@ export function DashboardView() {
       rewrites: rest,
     })
   }, [bumpDataVersion, issueState, persistIssueState, selectedFile, setFileContent, setPendingEditorHighlight])
+
+  const handleViewRewrite = useCallback(async (item: DashItem) => {
+    const backup = issueState.rewrites[item.id]
+    if (!backup) return
+    const latestMarkdown = await readFile(backup.targetPath).catch(() => "")
+    if (!latestMarkdown) return
+
+    setSelectedFile(backup.targetPath)
+    setFileContent(latestMarkdown)
+    setActiveView("wiki")
+    setPendingEditorHighlight({
+      path: backup.targetPath,
+      text: backup.replacementText,
+      nonce: Date.now(),
+    })
+  }, [issueState.rewrites, setActiveView, setFileContent, setPendingEditorHighlight, setSelectedFile])
 
   const items = useMemo((): DashItem[] => {
     const dashItems: DashItem[] = []
@@ -595,16 +623,6 @@ export function DashboardView() {
           type="button"
           onClick={(event) => {
             event.stopPropagation()
-            void handleEditDashItem(item)
-          }}
-          className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent"
-        >
-          {t("dashboard.actions.edit")}
-        </button>
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation()
             void runAiRewrite(item)
           }}
           disabled={isRewriting}
@@ -612,6 +630,18 @@ export function DashboardView() {
         >
           {isRewriting ? t("dashboard.actions.rewriting") : t("dashboard.actions.aiRewrite")}
         </button>
+        {hasBackup ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              void handleViewRewrite(item)
+            }}
+            className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent"
+          >
+            {t("dashboard.actions.viewRewrite")}
+          </button>
+        ) : null}
         {hasBackup ? (
           <button
             type="button"
@@ -636,7 +666,7 @@ export function DashboardView() {
         </button>
       </div>
     )
-  }, [handleEditDashItem, handleIgnoreDashItem, handleRestoreRewrite, issueState.rewrites, rewriteBusyId, runAiRewrite, t])
+  }, [handleIgnoreDashItem, handleRestoreRewrite, handleViewRewrite, issueState.rewrites, rewriteBusyId, runAiRewrite, t])
 
   const renderDashCard = useCallback((item: DashItem, config: (typeof SEVERITY_CONFIG)[DashSeverity], key: string) => (
     <div
@@ -648,7 +678,7 @@ export function DashboardView() {
         <span className="text-xs text-muted-foreground">
           [{item.source === "review" ? t("dashboard.source.review") : item.source === "lint" ? t("dashboard.source.lint") : t("dashboard.section.factCheck")}]
         </span>
-        <span className="truncate text-xs text-muted-foreground">{item.detail}</span>
+        <span className="truncate text-xs text-muted-foreground">{formatDashItemDetail(item)}</span>
       </div>
       <p className="mt-1 text-xs">{item.message}</p>
       {item.evidence && (
@@ -679,14 +709,17 @@ export function DashboardView() {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">{t("dashboard.title")}</h2>
-        {items.length > 0 && (
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="text-red-500">{grouped.blocking.length} {t("dashboard.severity.blocking")}</span>
-            <span className="text-orange-500">{grouped.high.length} {t("dashboard.severity.high")}</span>
-            <span className="text-amber-500">{grouped.medium.length} {t("dashboard.severity.medium")}</span>
-            <span className="text-blue-500">{grouped.low.length} {t("dashboard.severity.low")}</span>
-          </div>
-        )}
+        <div className="flex items-center gap-3">
+          {items.length > 0 && (
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="text-red-500">{grouped.blocking.length} {t("dashboard.severity.blocking")}</span>
+              <span className="text-orange-500">{grouped.high.length} {t("dashboard.severity.high")}</span>
+              <span className="text-amber-500">{grouped.medium.length} {t("dashboard.severity.medium")}</span>
+              <span className="text-blue-500">{grouped.low.length} {t("dashboard.severity.low")}</span>
+            </div>
+          )}
+          {headerActions}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto">
@@ -751,14 +784,14 @@ export function DashboardView() {
               </span>
             </div>
             <div className="mb-2 flex gap-2 text-xs">
-              <span className="text-red-500">{debtReport.criticalCount} critical</span>
-              <span className="text-amber-500">{debtReport.warningCount} warning</span>
+              <span className="text-red-500">{debtReport.criticalCount} 严重</span>
+              <span className="text-amber-500">{debtReport.warningCount} 警告</span>
             </div>
             {debtReport.items.filter((item) => item.debtLevel !== "normal").map((item, index) => (
               <div key={index} className="mb-1 rounded border bg-muted/30 p-2 text-xs">
                 <div className="flex items-center gap-2">
                   <span className={item.debtLevel === "critical" ? "text-red-500" : "text-amber-500"}>
-                    [{item.debtLevel === "critical" ? "critical" : "warning"}]
+                    [{item.debtLevel === "critical" ? DEBT_LEVEL_LABELS.critical : DEBT_LEVEL_LABELS.warning}]
                   </span>
                   <span>{item.name}</span>
                 </div>
@@ -787,10 +820,10 @@ export function DashboardView() {
         description={rewriteError || (rewriteBusyId === rewriteDialog?.item.id
           ? "正在生成修改内容，请稍候…"
           : rewriteDialog?.mode === "insert_before"
-            ? "AI 会先判断当前章节里最合适的补写位置，再生成需要补上的过渡事件。"
+            ? "右侧会包含补写内容和原文位置，确认后会覆盖左侧原文位置。"
             : t("dashboard.rewriteDialog.description"))}
-        sourceLabel={rewriteDialog?.mode === "insert_before" ? "补写位置" : t("dashboard.rewriteDialog.sourceLabel")}
-        candidateLabel={rewriteDialog?.mode === "insert_before" ? "AI补写内容" : t("dashboard.rewriteDialog.candidateLabel")}
+        sourceLabel={rewriteDialog?.mode === "insert_before" ? "原文位置" : t("dashboard.rewriteDialog.sourceLabel")}
+        candidateLabel={rewriteDialog?.mode === "insert_before" ? "修改后内容" : t("dashboard.rewriteDialog.candidateLabel")}
         sourceContent={rewriteDialog?.sourceContent || ""}
         candidateContent={rewriteDialog?.candidateContent || (rewriteBusyId === rewriteDialog?.item.id ? "正在生成修改内容，请稍候…" : "")}
         applyLabel={t("dashboard.rewriteDialog.apply")}
@@ -804,6 +837,11 @@ export function DashboardView() {
         secondaryActionDisabled={rewriteBusyId === rewriteDialog?.item.id}
         onApply={() => void handleApplyRewrite()}
         onSecondaryAction={() => void handleRegenerateRewrite()}
+        onCandidateContentChange={!rewriteError && rewriteBusyId !== rewriteDialog?.item.id
+          ? (content) => {
+            setRewriteDialog((current) => current ? { ...current, candidateContent: content } : current)
+          }
+          : undefined}
         onClose={() => {
           if (rewriteBusyId === rewriteDialog?.item.id) return
           setRewriteError(null)

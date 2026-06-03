@@ -29,6 +29,41 @@ function ensureModel(model: string, emptyMessage: string): string {
   return trimmed
 }
 
+export function normalizeModelTestError(error: Error): Error {
+  const message = error.message
+
+  if (/insufficient account balance/i.test(message)) {
+    return new Error("当前中转站账户余额不足或该模型没有可用额度，请先充值或更换可用模型。")
+  }
+
+  if (/client not allowed/i.test(message)) {
+    return new Error("当前中转站限制了客户端来源，已拒绝桌面端、浏览器或常见 SDK 请求。请联系中转站开通通用 OpenAI 兼容 API，或更换可直连的中转站。")
+  }
+
+  const unsupportedModel = extractUnsupportedModel(message)
+  if (unsupportedModel || (/HTTP 404/i.test(message) && /模型|model/i.test(message))) {
+    return new Error(
+      `当前接口不支持所选模型${unsupportedModel ? ` ${unsupportedModel}` : ""}。请从模型下拉框选择已拉取到的模型，或向中转站确认正确模型 ID。`,
+    )
+  }
+
+  return error
+}
+
+function extractUnsupportedModel(message: string): string | null {
+  const patterns = [
+    /不支持所选模型\s*["“]?([^"”}\s，,]+)/i,
+    /unsupported(?: selected)? model\s*["']?([^"'\s,}]+)/i,
+    /model\s+["']?([^"'\s,}]+)["']?\s+(?:is\s+)?(?:not found|not supported)/i,
+  ]
+
+  for (const pattern of patterns) {
+    const matched = message.match(pattern)?.[1]?.trim()
+    if (matched) return matched
+  }
+  return null
+}
+
 async function runChatModelTest(config: LlmConfig, prompt: string): Promise<LlmModelTestResult> {
   const model = ensureModel(config.model, "请先填写模型名称后再测试。")
   let content = ""
@@ -54,7 +89,7 @@ async function runChatModelTest(config: LlmConfig, prompt: string): Promise<LlmM
   )
 
   if (streamError) {
-    throw streamError
+    throw normalizeModelTestError(streamError)
   }
 
   const trimmed = content.trim()

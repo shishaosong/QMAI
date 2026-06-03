@@ -39,6 +39,10 @@ async function streamViaCodexCli(
 
 const DECODER = new TextDecoder()
 
+export function shouldRetryWithBrowserFetch(errorDetail: string): boolean {
+  return /client not allowed/i.test(errorDetail) && /tauri-plugin-http/i.test(errorDetail)
+}
+
 function parseLines(chunk: Uint8Array, buffer: string): [string[], string] {
   const text = buffer + DECODER.decode(chunk, { stream: true })
   const lines = text.split("\n")
@@ -103,16 +107,18 @@ export async function streamChat(
     combinedSignal = timeoutController.signal
   }
 
+  const body = providerConfig.buildBody(messages, requestOverrides)
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: providerConfig.headers,
+    body: JSON.stringify(body),
+    signal: combinedSignal,
+  }
+
   let response: Response
   try {
-    const body = providerConfig.buildBody(messages, requestOverrides)
     const httpFetch = await getHttpFetch()
-    response = await httpFetch(providerConfig.url, {
-      method: "POST",
-      headers: providerConfig.headers,
-      body: JSON.stringify(body),
-      signal: combinedSignal,
-    })
+    response = await httpFetch(providerConfig.url, requestInit)
   } catch (err) {
     if (signal?.aborted) {
       onDone()
@@ -152,8 +158,29 @@ export async function streamChat(
     } catch {
       // ignore body read failure
     }
-    onError(new Error(errorDetail))
-    return
+    if (shouldRetryWithBrowserFetch(errorDetail) && typeof globalThis.fetch === "function") {
+      try {
+        response = await globalThis.fetch(providerConfig.url, requestInit)
+      } catch (err) {
+        onError(err instanceof Error ? err : new Error(String(err)))
+        return
+      }
+
+      if (!response.ok) {
+        let retryErrorDetail = `HTTP ${response.status}: ${response.statusText}`
+        try {
+          const retryBody = await response.text()
+          if (retryBody) retryErrorDetail += ` — ${retryBody}`
+        } catch {
+          // ignore body read failure
+        }
+        onError(new Error(retryErrorDetail))
+        return
+      }
+    } else {
+      onError(new Error(errorDetail))
+      return
+    }
   }
 
   if (!response.body) {

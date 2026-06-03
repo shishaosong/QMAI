@@ -29,7 +29,11 @@ export async function startNovelReviewRun({
   useWikiStore.getState().setReviewRun({ runId, projectPath, filePath: selectedFile, running: true, results: [] })
 
   try {
-    const results = await reviewChapter(projectPath, fileContent, meta?.chapterNumber)
+    const results = await reviewChapter(projectPath, fileContent, meta?.chapterNumber, {
+      onThinking: (thinking) => {
+        useWikiStore.getState().finishReviewRun(runId, { running: true, thinking })
+      },
+    })
     useWikiStore.getState().finishReviewRun(runId, { running: true, results, error: undefined })
     await saveGenerationHistoryEntry(projectPath, {
       kind: "review",

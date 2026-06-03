@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react"
+import { useState, useCallback, useEffect, useMemo } from "react"
 import { useTranslation } from "react-i18next"
 import i18n from "@/i18n"
 import type { NovelReviewResult } from "@/lib/novel/review-adapter"
@@ -14,6 +14,14 @@ import {
   Trash2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useReviewStore, type ReviewItem } from "@/stores/review-store"
 import { useWikiStore } from "@/stores/wiki-store"
 import { writeFile, readFile, listDirectory, deleteFile } from "@/commands/fs"
@@ -25,6 +33,30 @@ import {
   type GenerationHistoryEntry,
 } from "@/lib/novel/generation-history"
 import { startNovelReviewRun } from "@/lib/novel/start-review-run"
+import { startSixDimensionReviewRun } from "@/lib/novel/start-six-dimension-review-run"
+import { SIX_REVIEW_DIMENSIONS, type SixReviewDimensionKey } from "@/lib/novel/dimension-review-adapter"
+import { streamChat } from "@/lib/llm-client"
+import { hasUsableLlm } from "@/lib/has-usable-llm"
+import {
+  createEmptyDashboardIssueState,
+  loadDashboardIssueState,
+  restoreDashboardRewriteInMarkdown,
+  saveDashboardIssueState,
+  type DashboardIssueState,
+} from "@/lib/dashboard-issue-actions"
+import {
+  buildVisibleNovelReviewActionItemsForDimensionResults,
+  buildVisibleNovelReviewActionItemsForScoreDimensions,
+  buildVisibleNovelReviewActionItems,
+  type NovelReviewActionItem,
+} from "@/lib/novel-review-action-items"
+import {
+  applyReviewRewriteEditsToMarkdown,
+  buildReviewRewritePlanMessages,
+  findReviewRewriteAnchors,
+  parseReviewRewritePlan,
+  type ReviewRewriteEdit,
+} from "@/lib/review-rewrite-plan"
 
 const typeConfig: Record<ReviewItem["type"], { icon: typeof AlertTriangle; labelKey: string; novelLabelKey: string; color: string }> = {
   contradiction: { icon: AlertTriangle, labelKey: "review.typeLabels.contradiction", novelLabelKey: "novel.review.typeLabels.contradiction", color: "text-amber-500" },
@@ -34,7 +66,31 @@ const typeConfig: Record<ReviewItem["type"], { icon: typeof AlertTriangle; label
   suggestion: { icon: Lightbulb, labelKey: "review.typeLabels.suggestion", novelLabelKey: "novel.review.typeLabels.suggestion", color: "text-emerald-500" },
 }
 
-export function ReviewView() {
+interface ReviewRewriteEditState extends ReviewRewriteEdit {
+  status: "pending" | "ignored"
+  editing: boolean
+}
+
+interface ReviewRewriteDialogState {
+  item: NovelReviewActionItem
+  targetPath: string
+  chapterContent: string
+  edits: ReviewRewriteEditState[]
+}
+
+interface ReviewViewProps {
+  title?: string
+  emptyMessage?: string
+  resultScoreDimensionKeys?: string[]
+  dimensionKey?: SixReviewDimensionKey
+}
+
+export function ReviewView({
+  title,
+  emptyMessage,
+  resultScoreDimensionKeys,
+  dimensionKey,
+}: ReviewViewProps = {}) {
   const { t } = useTranslation()
   const novelMode = useWikiStore((s) => s.novelMode)
   const items = useReviewStore((s) => s.items)
@@ -43,11 +99,14 @@ export function ReviewView() {
   const clearResolved = useReviewStore((s) => s.clearResolved)
   const project = useWikiStore((s) => s.project)
   const selectedFile = useWikiStore((s) => s.selectedFile)
+  const selectedReviewFilePath = useWikiStore((s) => s.selectedReviewFilePath)
   const fileContent = useWikiStore((s) => s.fileContent)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const setFileContent = useWikiStore((s) => s.setFileContent)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const setFileTree = useWikiStore((s) => s.setFileTree)
+  const setPendingEditorHighlight = useWikiStore((s) => s.setPendingEditorHighlight)
+  const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const reviewRun = useWikiStore((s) => s.reviewRun)
   const novelReviewResults = reviewRun?.results ?? []
   const isReviewing = reviewRun?.running ?? false
@@ -56,6 +115,32 @@ export function ReviewView() {
   const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null)
   const [cognitionState, setCognitionState] = useState<CognitionState | null>(null)
   const [cognitionExpanded, setCognitionExpanded] = useState(false)
+  const [issueState, setIssueState] = useState<DashboardIssueState>(createEmptyDashboardIssueState())
+  const [rewriteDialog, setRewriteDialog] = useState<ReviewRewriteDialogState | null>(null)
+  const [rewriteBusyId, setRewriteBusyId] = useState<string | null>(null)
+  const [rewriteError, setRewriteError] = useState<string | null>(null)
+
+  const dimensionScoped = Boolean(dimensionKey) || resultScoreDimensionKeys !== undefined
+  const selectedDimensionResult = dimensionKey ? reviewRun?.dimensionResults?.[dimensionKey] : undefined
+  const selectedDimensionThinking = dimensionKey ? reviewRun?.dimensionThinking?.[dimensionKey] : undefined
+  const novelReviewActionItems = useMemo(
+    () => dimensionKey
+      ? buildVisibleNovelReviewActionItemsForDimensionResults(
+        reviewRun?.filePath,
+        reviewRun?.dimensionResults,
+        issueState.ignored,
+        dimensionKey,
+      )
+      : dimensionScoped
+      ? buildVisibleNovelReviewActionItemsForScoreDimensions(
+        reviewRun?.filePath,
+        novelReviewResults,
+        issueState.ignored,
+        resultScoreDimensionKeys ?? [],
+      )
+      : buildVisibleNovelReviewActionItems(reviewRun?.filePath, novelReviewResults, issueState.ignored),
+    [dimensionKey, dimensionScoped, issueState.ignored, novelReviewResults, resultScoreDimensionKeys, reviewRun?.dimensionResults, reviewRun?.filePath],
+  )
 
   useEffect(() => {
     if (!novelMode || !project) {
@@ -64,6 +149,22 @@ export function ReviewView() {
     }
     loadCognitionState(project.path).then(setCognitionState).catch(() => setCognitionState(null))
   }, [novelMode, project, novelReviewResults])
+
+  useEffect(() => {
+    if (!project?.path) {
+      setIssueState(createEmptyDashboardIssueState())
+      return
+    }
+    let cancelled = false
+    loadDashboardIssueState(project.path)
+      .then((state) => {
+        if (!cancelled) setIssueState(state)
+      })
+      .catch(() => {
+        if (!cancelled) setIssueState(createEmptyDashboardIssueState())
+      })
+    return () => { cancelled = true }
+  }, [project?.path])
 
   const loadReviewHistory = useCallback(async () => {
     if (!project) {
@@ -82,17 +183,399 @@ export function ReviewView() {
     setExpandedHistoryId(null)
   }, [novelMode, project, loadReviewHistory])
 
-  const openReviewSource = useCallback(async (targetPath = reviewRun?.filePath) => {
-    if (!targetPath) return
+  const persistIssueState = useCallback(async (nextState: DashboardIssueState) => {
+    setIssueState(nextState)
+    if (project?.path) {
+      await saveDashboardIssueState(project.path, nextState)
+    }
+  }, [project?.path])
+
+  const showAiRewriteAlert = useCallback((message: string) => {
+    window.alert(`AI修改暂时无法继续：${message}`)
+  }, [])
+
+  const openNovelReviewActionItem = useCallback(async (item: NovelReviewActionItem, highlight = false) => {
     try {
-      const content = await readFile(targetPath)
-      setSelectedFile(targetPath)
+      const content = await readFile(item.targetPath)
+      setSelectedFile(item.targetPath)
       setFileContent(content)
       setActiveView("wiki")
+      if (highlight) {
+        const anchor = findReviewRewriteAnchors(content, [item.evidence, item.secondaryEvidence])[0]
+        if (anchor) {
+          setPendingEditorHighlight({
+            path: item.targetPath,
+            text: anchor.selection.text,
+            nonce: Date.now(),
+          })
+        }
+      }
+      return { path: item.targetPath, content }
     } catch (error) {
-      console.error("[ReviewView] open source failed:", error)
+      console.error("[ReviewView] open AI review item failed:", error)
+      return null
     }
-  }, [reviewRun?.filePath, setActiveView, setFileContent, setSelectedFile])
+  }, [setActiveView, setFileContent, setPendingEditorHighlight, setSelectedFile])
+
+  const handleIgnoreNovelReviewItem = useCallback(async (item: NovelReviewActionItem) => {
+    if (issueState.ignored[item.id]) return
+    await persistIssueState({
+      ...issueState,
+      ignored: {
+        ...issueState.ignored,
+        [item.id]: true,
+      },
+    })
+  }, [issueState, persistIssueState])
+
+  const generateNovelReviewRewriteEdits = useCallback(async (
+    item: NovelReviewActionItem,
+    chapterContent: string,
+    targetOriginalText?: string,
+  ): Promise<ReviewRewriteEdit[]> => {
+    const llmConfig = useWikiStore.getState().llmConfig
+    const directAnchors = targetOriginalText
+      ? findReviewRewriteAnchors(chapterContent, [targetOriginalText])
+      : findReviewRewriteAnchors(chapterContent, [item.evidence, item.secondaryEvidence])
+
+    let rawResponse = ""
+    await streamChat(
+      llmConfig,
+      buildReviewRewritePlanMessages({
+        message: item.message,
+        suggestion: item.suggestion,
+        evidence: targetOriginalText || item.evidence,
+        secondaryEvidence: targetOriginalText ? undefined : item.secondaryEvidence,
+        chapterContent,
+        directAnchors,
+      }),
+      {
+        onToken: (token) => {
+          rawResponse += token
+        },
+        onDone: () => {},
+        onError: (error) => {
+          throw error
+        },
+      },
+    )
+    const parsed = parseReviewRewritePlan(rawResponse)
+    if (parsed.length > 0 || !targetOriginalText) return parsed
+    const fallbackReplacement = rawResponse
+      .trim()
+      .replace(/^```(?:json|markdown|md)?/i, "")
+      .replace(/```$/i, "")
+      .trim()
+    if (!fallbackReplacement) return []
+    return [{
+      id: "edit-1",
+      originalText: targetOriginalText,
+      replacementText: fallbackReplacement,
+    }]
+  }, [])
+
+  const runNovelReviewAiRewrite = useCallback(async (item: NovelReviewActionItem) => {
+    if (!project) {
+      showAiRewriteAlert("当前没有打开项目。")
+      return
+    }
+    const llmConfig = useWikiStore.getState().llmConfig
+    if (!hasUsableLlm(llmConfig)) {
+      showAiRewriteAlert("请先在设置里配置可用的 AI 模型。")
+      return
+    }
+
+    const chapterContent = await readFile(item.targetPath).catch(() => "")
+    if (!chapterContent) {
+      showAiRewriteAlert("没有找到对应章节，暂时无法改写。")
+      return
+    }
+
+    setRewriteBusyId(item.id)
+    setRewriteError(null)
+    setRewriteDialog({
+      item,
+      targetPath: item.targetPath,
+      chapterContent,
+      edits: [],
+    })
+
+    try {
+      const edits = await generateNovelReviewRewriteEdits(item, chapterContent)
+      if (edits.length === 0) {
+        setRewriteError("AI 没有返回可用的修改项，请重新生成或检查模型设置。")
+        return
+      }
+      setRewriteDialog((current) => {
+        if (!current || current.item.id !== item.id) return current
+        return {
+          ...current,
+          edits: edits.map((edit, index) => ({
+            ...edit,
+            id: `${item.id}:edit-${index + 1}`,
+            status: "pending",
+            editing: false,
+          })),
+        }
+      })
+    } catch (error) {
+      console.error("[ReviewView] AI review rewrite failed:", error)
+      setRewriteError(error instanceof Error ? error.message : "生成失败，请稍后重试。")
+    } finally {
+      setRewriteBusyId(null)
+    }
+  }, [generateNovelReviewRewriteEdits, project, showAiRewriteAlert])
+
+  const handleApplyRewrite = useCallback(async () => {
+    if (!rewriteDialog) return
+    if (rewriteBusyId === rewriteDialog.item.id) return
+    if (rewriteError) return
+    const activeEdits = rewriteDialog.edits
+      .filter((edit) => edit.status !== "ignored" && edit.replacementText.trim())
+      .map((edit) => ({
+        id: edit.id,
+        originalText: edit.originalText,
+        replacementText: edit.replacementText,
+        note: edit.note,
+      }))
+    if (activeEdits.length === 0) {
+      setRewriteError("没有可确认的修改项。")
+      return
+    }
+
+    const latestMarkdown = await readFile(rewriteDialog.targetPath).catch(() => "")
+    if (!latestMarkdown) return
+
+    const applyResult = applyReviewRewriteEditsToMarkdown(latestMarkdown, activeEdits)
+    if (!applyResult.ok) {
+      setRewriteError(`有 ${applyResult.failed.length} 条原文片段没有定位到，已取消写入。请重新生成或编辑原文片段。`)
+      return
+    }
+
+    await writeFile(rewriteDialog.targetPath, applyResult.markdown)
+    bumpDataVersion()
+    if (selectedFile === rewriteDialog.targetPath) {
+      setFileContent(applyResult.markdown)
+      setPendingEditorHighlight({
+        path: rewriteDialog.targetPath,
+        text: activeEdits[0]?.replacementText ?? "",
+        nonce: Date.now(),
+      })
+    }
+
+    const nextRewrites = { ...issueState.rewrites }
+    for (const applied of applyResult.applied) {
+      nextRewrites[applied.edit.id] = {
+        ...applied.backup,
+        itemId: applied.edit.id,
+        targetPath: rewriteDialog.targetPath,
+      }
+    }
+
+    await persistIssueState({
+      ...issueState,
+      rewrites: nextRewrites,
+    })
+    setRewriteError(null)
+    setRewriteDialog(null)
+  }, [bumpDataVersion, issueState, persistIssueState, rewriteBusyId, rewriteDialog, rewriteError, selectedFile, setFileContent, setPendingEditorHighlight])
+
+  const handleRegenerateAllRewrite = useCallback(async () => {
+    if (!rewriteDialog) return
+    setRewriteError(null)
+    await runNovelReviewAiRewrite(rewriteDialog.item)
+  }, [rewriteDialog, runNovelReviewAiRewrite])
+
+  const handleRegenerateOneRewrite = useCallback(async (editId: string) => {
+    if (!rewriteDialog) return
+    const edit = rewriteDialog.edits.find((item) => item.id === editId)
+    if (!edit) return
+
+    setRewriteBusyId(editId)
+    setRewriteError(null)
+    try {
+      const latestMarkdown = await readFile(rewriteDialog.targetPath).catch(() => rewriteDialog.chapterContent)
+      const edits = await generateNovelReviewRewriteEdits(rewriteDialog.item, latestMarkdown, edit.originalText)
+      const nextEdit = edits[0]
+      if (!nextEdit) {
+        setRewriteError("AI 没有返回可用的单条修改结果。")
+        return
+      }
+      setRewriteDialog((current) => {
+        if (!current || current.item.id !== rewriteDialog.item.id) return current
+        return {
+          ...current,
+          edits: current.edits.map((row) => row.id === editId
+            ? {
+              ...row,
+              replacementText: nextEdit.replacementText,
+              note: nextEdit.note,
+              status: "pending",
+            }
+            : row),
+        }
+      })
+    } catch (error) {
+      setRewriteError(error instanceof Error ? error.message : "重新生成失败，请稍后重试。")
+    } finally {
+      setRewriteBusyId(null)
+    }
+  }, [generateNovelReviewRewriteEdits, rewriteDialog])
+
+  const handleRestoreRewrite = useCallback(async (item: NovelReviewActionItem) => {
+    const backupEntries = Object.entries(issueState.rewrites)
+      .filter(([key]) => key === item.id || key.startsWith(`${item.id}:`))
+      .reverse()
+    if (backupEntries.length === 0) return
+
+    const firstBackup = backupEntries[0][1]
+    const latestMarkdown = await readFile(firstBackup.targetPath).catch(() => "")
+    if (!latestMarkdown) return
+
+    let restoredMarkdown = latestMarkdown
+    for (const [, backup] of backupEntries) {
+      const nextMarkdown = restoreDashboardRewriteInMarkdown(restoredMarkdown, backup)
+      if (nextMarkdown) restoredMarkdown = nextMarkdown
+    }
+
+    await writeFile(firstBackup.targetPath, restoredMarkdown)
+    bumpDataVersion()
+    if (selectedFile === firstBackup.targetPath) {
+      setFileContent(restoredMarkdown)
+      setPendingEditorHighlight({
+        path: firstBackup.targetPath,
+        text: firstBackup.originalText,
+        nonce: Date.now(),
+      })
+    }
+
+    const rest = { ...issueState.rewrites }
+    for (const [key] of backupEntries) {
+      delete rest[key]
+    }
+    await persistIssueState({
+      ...issueState,
+      rewrites: rest,
+    })
+  }, [bumpDataVersion, issueState, persistIssueState, selectedFile, setFileContent, setPendingEditorHighlight])
+
+  const handleViewRewrite = useCallback(async (item: NovelReviewActionItem) => {
+    const backupEntries = Object.entries(issueState.rewrites)
+      .filter(([key]) => key === item.id || key.startsWith(`${item.id}:`))
+      .map(([, backup]) => backup)
+    const firstBackup = backupEntries[0]
+    if (!firstBackup) return
+    const latestMarkdown = await readFile(firstBackup.targetPath).catch(() => "")
+    if (!latestMarkdown) return
+
+    const highlightText = backupEntries
+      .map((backup) => backup.replacementText)
+      .find((text) => text && latestMarkdown.includes(text))
+      || firstBackup.replacementText
+
+    setSelectedFile(firstBackup.targetPath)
+    setFileContent(latestMarkdown)
+    setActiveView("wiki")
+    setPendingEditorHighlight({
+      path: firstBackup.targetPath,
+      text: highlightText,
+      nonce: Date.now(),
+    })
+  }, [issueState.rewrites, setActiveView, setFileContent, setPendingEditorHighlight, setSelectedFile])
+
+  const renderNovelReviewActionBar = useCallback((item: NovelReviewActionItem) => {
+    const hasBackup = Object.keys(issueState.rewrites).some((key) => key === item.id || key.startsWith(`${item.id}:`))
+    const isRewriting = Boolean(rewriteBusyId && (rewriteBusyId === item.id || rewriteBusyId.startsWith(`${item.id}:`)))
+    return (
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            void runNovelReviewAiRewrite(item)
+          }}
+          disabled={isRewriting}
+          className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {isRewriting ? t("dashboard.actions.rewriting") : t("dashboard.actions.aiRewrite")}
+        </button>
+        {hasBackup ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              void handleViewRewrite(item)
+            }}
+            className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent"
+          >
+            {t("dashboard.actions.viewRewrite")}
+          </button>
+        ) : null}
+        {hasBackup ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              void handleRestoreRewrite(item)
+            }}
+            className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent"
+          >
+            {t("dashboard.actions.restore")}
+          </button>
+        ) : null}
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation()
+            void handleIgnoreNovelReviewItem(item)
+          }}
+          className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-accent"
+        >
+          {t("dashboard.actions.ignore")}
+        </button>
+      </div>
+    )
+  }, [handleIgnoreNovelReviewItem, handleRestoreRewrite, handleViewRewrite, issueState.rewrites, rewriteBusyId, runNovelReviewAiRewrite, t])
+
+  const handleRewriteEditReplacementChange = useCallback((editId: string, replacementText: string) => {
+    setRewriteDialog((current) => current
+      ? {
+        ...current,
+        edits: current.edits.map((edit) => edit.id === editId
+          ? { ...edit, replacementText, status: "pending" }
+          : edit),
+      }
+      : current)
+  }, [])
+
+  const handleRewriteEditIgnoredChange = useCallback((editId: string, ignored: boolean) => {
+    setRewriteDialog((current) => current
+      ? {
+        ...current,
+        edits: current.edits.map((edit) => edit.id === editId
+          ? { ...edit, status: ignored ? "ignored" : "pending" }
+          : edit),
+      }
+      : current)
+  }, [])
+
+  const handleIgnoreAllRewriteEdits = useCallback(() => {
+    setRewriteDialog((current) => current
+      ? {
+        ...current,
+        edits: current.edits.map((edit) => ({ ...edit, status: "ignored" })),
+      }
+      : current)
+  }, [])
+
+  const handleEditAllRewriteEdits = useCallback(() => {
+    setRewriteDialog((current) => current
+      ? {
+        ...current,
+        edits: current.edits.map((edit) => ({ ...edit, status: "pending", editing: true })),
+      }
+      : current)
+  }, [])
 
   const handleDeleteHistory = useCallback(async (entry: GenerationHistoryEntry) => {
     if (!project) return
@@ -104,11 +587,25 @@ export function ReviewView() {
   }, [project, loadReviewHistory, t])
 
   const handleNovelReview = useCallback(async () => {
-    if (!project || !selectedFile || !fileContent.trim()) return
+    const reviewFilePath = selectedReviewFilePath || selectedFile
+    if (!project || !reviewFilePath) return
+    const reviewFileContent = reviewFilePath === selectedFile ? fileContent : await readFile(reviewFilePath)
+    if (!reviewFileContent.trim()) return
+    if (dimensionKey) {
+      await startSixDimensionReviewRun({
+        fileContent: reviewFileContent,
+        projectPath: project.path,
+        selectedFile: reviewFilePath,
+        t,
+        onHistorySaved: loadReviewHistory,
+        dimensionKey,
+      })
+      return
+    }
     await startNovelReviewRun({
-      fileContent,
+      fileContent: reviewFileContent,
       projectPath: project.path,
-      selectedFile,
+      selectedFile: reviewFilePath,
       t,
       onHistorySaved: loadReviewHistory,
     })
@@ -147,7 +644,7 @@ export function ReviewView() {
       }
     }
     */
-  }, [fileContent, project, selectedFile, t, loadReviewHistory])
+  }, [dimensionKey, fileContent, project, selectedFile, selectedReviewFilePath, t, loadReviewHistory])
 
   const handleResolve = useCallback(async (id: string, action: string) => {
     const novelMode = useWikiStore.getState().novelMode
@@ -277,17 +774,25 @@ export function ReviewView() {
     }
   }, [project, items, resolveItem, setFileTree])
 
-  const pending = items.filter((i) => !i.resolved)
-  const resolved = items.filter((i) => i.resolved)
+  const pending = dimensionScoped ? [] : items.filter((i) => !i.resolved)
+  const resolved = dimensionScoped ? [] : items.filter((i) => i.resolved)
+  const headerCount = dimensionScoped ? novelReviewActionItems.length : pending.length
+  const showReviewHistory = !dimensionScoped && reviewHistory.length > 0
+  const showCognition = !dimensionScoped && novelMode && cognitionState
+  const reviewThinkingContent = dimensionKey ? selectedDimensionThinking : reviewRun?.thinking
+  const reviewThinkingTitle = dimensionKey ? "六维阶段式审查" : "阶段式深度审稿"
+  const reviewButtonLabel = isReviewing
+    ? (dimensionKey ? reviewRun?.dimensionProgress || "正在审查此维度" : t("novel.review.reviewing"))
+    : (dimensionKey ? "重新审查此维度" : t("novel.review.startReview"))
 
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">
-          {t(novelMode ? "novel.review.title" : "review.title")}
-          {pending.length > 0 && (
+          {title || t(novelMode ? "novel.review.title" : "review.title")}
+          {headerCount > 0 && (
             <span className="ml-2 rounded-full bg-primary px-2 py-0.5 text-xs text-primary-foreground">
-              {pending.length}
+              {headerCount}
             </span>
           )}
         </h2>
@@ -296,10 +801,10 @@ export function ReviewView() {
             variant="outline"
             size="sm"
             onClick={handleNovelReview}
-            disabled={isReviewing}
+            disabled={isReviewing || !(selectedReviewFilePath || selectedFile)}
             className="ml-auto"
           >
-            {isReviewing ? t("novel.review.reviewing") : t("novel.review.startReview")}
+            {reviewButtonLabel}
           </Button>
         )}
         {resolved.length > 0 && (
@@ -317,10 +822,33 @@ export function ReviewView() {
             <span>{reviewError}</span>
           </div>
         )}
-        {items.length === 0 && novelReviewResults.length === 0 && reviewHistory.length === 0 ? (
+        {dimensionKey && selectedDimensionResult && (
+          <div className="m-3 rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-foreground">
+                {SIX_REVIEW_DIMENSIONS[dimensionKey].label}评分：{selectedDimensionResult.score}
+              </span>
+              <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                {selectedDimensionResult.status}
+              </span>
+            </div>
+            {selectedDimensionResult.summary && (
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">{selectedDimensionResult.summary}</p>
+            )}
+          </div>
+        )}
+        {isReviewing && reviewThinkingContent && (
+          <div className="m-3 rounded-md border bg-muted/40 p-3 text-xs">
+            <div className="mb-2 font-medium text-foreground">{reviewThinkingTitle}</div>
+            <pre className="max-h-52 whitespace-pre-wrap overflow-auto text-muted-foreground">
+              {reviewThinkingContent}
+            </pre>
+          </div>
+        )}
+        {pending.length === 0 && resolved.length === 0 && novelReviewActionItems.length === 0 && !showReviewHistory ? (
           <div className="flex flex-col items-center justify-center gap-2 p-8 text-center text-sm text-muted-foreground">
             <CheckCircle2 className="h-8 w-8 text-muted-foreground/30" />
-            <p>{t(novelMode ? "novel.review.allClear" : "review.allClear")}</p>
+            <p>{emptyMessage || t(novelMode ? "novel.review.allClear" : "review.allClear")}</p>
           </div>
         ) : (
           <div className="flex flex-col gap-2 p-3">
@@ -345,25 +873,27 @@ export function ReviewView() {
                 onDismiss={dismissItem}
               />
             ))}
-            {novelReviewResults.length > 0 && (
-              <div className="mt-4 space-y-2">
-                <h3 className="text-xs font-semibold text-muted-foreground">
-                  {t("novel.review.resultsTitle")}
-                </h3>
-                {novelReviewResults.map((result, i) => {
-                  const severityKey = `review.results.severity.${result.severity}`
-                  const dimensionKey = `review.results.dimension.${result.type}`
-                  const severityLabel = i18n.exists(severityKey) ? i18n.t(severityKey) : result.severity
-                  const typeLabel = i18n.exists(dimensionKey) ? i18n.t(dimensionKey) : result.type
+            {novelReviewActionItems.length > 0 && (
+              <div className={dimensionScoped ? "space-y-2" : "mt-4 space-y-2"}>
+                {!dimensionScoped && (
+                  <h3 className="text-xs font-semibold text-muted-foreground">
+                    {t("novel.review.resultsTitle")}
+                  </h3>
+                )}
+                {novelReviewActionItems.map((item) => {
+                  const severityKey = `review.results.severity.${item.reviewSeverity}`
+                  const dimensionKey = `review.results.dimension.${item.detail}`
+                  const severityLabel = i18n.exists(severityKey) ? i18n.t(severityKey) : item.reviewSeverity
+                  const typeLabel = i18n.exists(dimensionKey) ? i18n.t(dimensionKey) : item.detail
 
                   return (
                     <div
-                      key={i}
-                      onClick={() => void openReviewSource()}
+                      key={item.id}
+                      onClick={() => void openNovelReviewActionItem(item)}
                       className={`cursor-pointer rounded-md border p-3 text-sm transition-colors hover:border-primary/50 ${
-                        result.severity === "error"
+                        item.reviewSeverity === "error"
                           ? "border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950"
-                          : result.severity === "warning"
+                          : item.reviewSeverity === "warning"
                             ? "border-amber-300 bg-amber-50 dark:border-amber-800 dark:bg-amber-950"
                             : "border-blue-300 bg-blue-50 dark:border-blue-800 dark:bg-blue-950"
                       }`}
@@ -372,21 +902,22 @@ export function ReviewView() {
                         <span className="font-medium">{typeLabel}</span>
                         <span className="text-xs text-muted-foreground">{severityLabel}</span>
                       </div>
-                      <p className="mt-1">{result.message}</p>
-                      {result.evidence && (
-                        <p className="mt-1 text-xs text-muted-foreground italic">「{result.evidence}」</p>
+                      <p className="mt-1">{item.message}</p>
+                      {item.evidence && (
+                        <p className="mt-1 text-xs text-muted-foreground italic">「{item.evidence}」</p>
                       )}
-                      {result.suggestion && (
+                      {item.suggestion && (
                         <p className="mt-1 text-xs text-green-700 dark:text-green-400">
-                          💡 {result.suggestion}
+                          💡 {item.suggestion}
                         </p>
                       )}
+                      {renderNovelReviewActionBar(item)}
                     </div>
                   )
                 })}
               </div>
             )}
-            {reviewHistory.length > 0 && (
+            {showReviewHistory && (
               <div className="mt-4 space-y-2">
                 <h3 className="text-xs font-semibold text-muted-foreground">
                   {t("novel.review.historyTitle")}
@@ -433,7 +964,7 @@ export function ReviewView() {
                 })}
               </div>
             )}
-            {novelMode && cognitionState && (
+            {showCognition && (
               <div className="mt-4 rounded-md border">
                 <button
                   className="flex w-full items-center justify-between px-3 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
@@ -483,7 +1014,154 @@ export function ReviewView() {
           </div>
         )}
       </div>
+
+      <ReviewRewritePreviewDialog
+        open={Boolean(rewriteDialog)}
+        edits={rewriteDialog?.edits ?? []}
+        error={rewriteError}
+        busy={Boolean(rewriteBusyId)}
+        busyId={rewriteBusyId}
+        onReplacementChange={handleRewriteEditReplacementChange}
+        onIgnoredChange={handleRewriteEditIgnoredChange}
+        onRegenerateOne={(editId) => void handleRegenerateOneRewrite(editId)}
+        onRegenerateAll={() => void handleRegenerateAllRewrite()}
+        onIgnoreAll={handleIgnoreAllRewriteEdits}
+        onEditAll={handleEditAllRewriteEdits}
+        onApply={() => void handleApplyRewrite()}
+        onClose={() => {
+          if (rewriteBusyId === rewriteDialog?.item.id) return
+          setRewriteError(null)
+          setRewriteDialog(null)
+        }}
+      />
     </div>
+  )
+}
+
+function ReviewRewritePreviewDialog({
+  open,
+  edits,
+  error,
+  busy,
+  busyId,
+  onReplacementChange,
+  onIgnoredChange,
+  onRegenerateOne,
+  onRegenerateAll,
+  onIgnoreAll,
+  onEditAll,
+  onApply,
+  onClose,
+}: {
+  open: boolean
+  edits: ReviewRewriteEditState[]
+  error: string | null
+  busy: boolean
+  busyId: string | null
+  onReplacementChange: (editId: string, replacementText: string) => void
+  onIgnoredChange: (editId: string, ignored: boolean) => void
+  onRegenerateOne: (editId: string) => void
+  onRegenerateAll: () => void
+  onIgnoreAll: () => void
+  onEditAll: () => void
+  onApply: () => void
+  onClose: () => void
+}) {
+  const activeCount = edits.filter((edit) => edit.status !== "ignored").length
+  const hasPendingContent = edits.some((edit) => edit.status !== "ignored" && edit.replacementText.trim())
+
+  return (
+    <Dialog open={open} onOpenChange={(next) => { if (!next && !busy) onClose() }}>
+      <DialogContent className="sm:max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>AI修改预览</DialogTitle>
+          <DialogDescription>
+            左侧是需要修改的原文，右侧是 AI 生成的新内容。确认后才会写入原章节。
+          </DialogDescription>
+        </DialogHeader>
+
+        {error ? (
+          <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+            {error}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" onClick={onRegenerateAll} disabled={busy}>
+            全部重新生成
+          </Button>
+          <Button variant="outline" size="sm" onClick={onIgnoreAll} disabled={busy || edits.length === 0}>
+            全部忽略
+          </Button>
+          <Button variant="outline" size="sm" onClick={onEditAll} disabled={busy || edits.length === 0}>
+            全部编辑
+          </Button>
+          {busy && (
+            <span className="text-xs text-muted-foreground">正在生成修改内容，请稍候...</span>
+          )}
+        </div>
+
+        <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+          {edits.length === 0 ? (
+            <div className="rounded-md border bg-muted/20 p-4 text-sm text-muted-foreground">
+              正在等待 AI 返回修改项。
+            </div>
+          ) : edits.map((edit, index) => {
+            const ignored = edit.status === "ignored"
+            const rowBusy = busyId === edit.id
+            return (
+              <div
+                key={edit.id}
+                className={`rounded-md border p-3 ${ignored ? "bg-muted/40 opacity-60" : "bg-background"}`}
+              >
+                <div className="mb-2 flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">修改 {index + 1}</span>
+                  {edit.note ? <span className="text-xs text-muted-foreground">{edit.note}</span> : null}
+                  <div className="ml-auto flex items-center gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onRegenerateOne(edit.id)}
+                      disabled={busy}
+                      className="h-7 text-xs"
+                    >
+                      {rowBusy ? "生成中..." : "重新生成"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => onIgnoredChange(edit.id, !ignored)}
+                      disabled={busy}
+                      className="h-7 text-xs"
+                    >
+                      {ignored ? "恢复修改" : "忽略不改"}
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <div className="min-h-0 rounded-md border bg-red-50/70 p-3 text-sm leading-6 whitespace-pre-wrap text-red-900 dark:bg-red-950/25 dark:text-red-200">
+                    {edit.originalText}
+                  </div>
+                  <textarea
+                    value={edit.replacementText}
+                    onChange={(event) => onReplacementChange(edit.id, event.target.value)}
+                    disabled={busy || ignored}
+                    className="min-h-32 rounded-md border bg-emerald-50/70 p-3 text-sm leading-6 text-emerald-950 outline-none focus:border-ring disabled:opacity-70 dark:bg-emerald-950/25 dark:text-emerald-100"
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={busy}>取消</Button>
+          <Button onClick={onApply} disabled={busy || !hasPendingContent || activeCount === 0}>
+            确认修改
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   )
 }
 

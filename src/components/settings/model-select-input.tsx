@@ -9,6 +9,34 @@ interface ModelSelectInputProps {
   onChange: (value: string) => void
 }
 
+interface ModelSelectOption {
+  value: string
+  label: string
+}
+
+export function buildModelSelectOptions(value: string, options: string[]): ModelSelectOption[] {
+  const current = value.trim()
+  const fetched = Array.from(new Set(options.map((item) => item.trim()).filter(Boolean)))
+  const hasFetchedModels = fetched.length > 0
+  const hasCurrentInFetched = current ? fetched.includes(current) : false
+  const ordered = current && hasCurrentInFetched
+    ? [current, ...fetched.filter((model) => model !== current)]
+    : fetched
+
+  if (current && hasFetchedModels && !hasCurrentInFetched) {
+    return [
+      { value: current, label: `当前填写：${current}（不在已拉取模型中）` },
+      ...ordered.map((model) => ({ value: model, label: model })),
+    ]
+  }
+
+  if (current && !hasFetchedModels) {
+    return [{ value: current, label: current }]
+  }
+
+  return ordered.map((model) => ({ value: model, label: model }))
+}
+
 export function ModelSelectInput({
   value,
   options,
@@ -16,8 +44,8 @@ export function ModelSelectInput({
   inputPlaceholder,
   onChange,
 }: ModelSelectInputProps) {
-  const mergedOptions = useMemo(
-    () => Array.from(new Set([value, ...options].map((item) => item.trim()).filter(Boolean))),
+  const selectOptions = useMemo(
+    () => buildModelSelectOptions(value, options),
     [options, value],
   )
 
@@ -29,9 +57,9 @@ export function ModelSelectInput({
         className="h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm lg:w-72"
       >
         <option value="__empty__">{selectPlaceholder}</option>
-        {mergedOptions.map((model) => (
-          <option key={model} value={model}>
-            {model}
+        {selectOptions.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </select>

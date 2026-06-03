@@ -30,13 +30,14 @@ interface ChatMessageProps {
   novelMode?: boolean
   projectPath?: string | null
   onSaveAsChapter?: (content: string) => void
+  onContinueNextChapter?: () => void
   onSaveAsDraft?: (content: string) => void
   onDiscardDraft?: () => void
   saveStatus?: string
   isSaving?: boolean
 }
 
-export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode, projectPath, onSaveAsChapter, saveStatus, isSaving }: ChatMessageProps) {
+export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode, projectPath, onSaveAsChapter, onContinueNextChapter, saveStatus, isSaving }: ChatMessageProps) {
   const isUser = message.role === "user"
   const isSystem = message.role === "system"
   const isAssistant = message.role === "assistant"
@@ -88,6 +89,16 @@ export function ChatMessage({ message, isLastAssistant, onRegenerate, novelMode,
                 className="rounded border border-border px-2 py-0.5 text-[11px] text-foreground hover:bg-accent disabled:opacity-50"
               >
                 {isSaving ? "保存中..." : "保存到章节库"}
+              </button>
+            )}
+            {novelMode && isLastAssistant && onContinueNextChapter && (
+              <button
+                type="button"
+                onClick={onContinueNextChapter}
+                disabled={isSaving}
+                className="rounded border border-border px-2 py-0.5 text-[11px] text-foreground hover:bg-accent disabled:opacity-50"
+              >
+                继续生成下一章
               </button>
             )}
             {(hovered || (novelMode && isLastAssistant)) && (
@@ -684,24 +695,21 @@ function separateThinking(text: string): { thinking: string | null; answer: stri
   return { thinking, answer }
 }
 
-/** Streaming thinking: shows latest ~5 lines rolling upward with animation */
+/** Streaming thinking: show every stage so the user can inspect progress. */
 function StreamingThinkingBlock({ content }: { content: string }) {
   const lines = content.split("\n").filter((l) => l.trim())
-  const visibleLines = lines.slice(-5)
 
   return (
     <div className="rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 px-2.5 py-2">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="text-sm animate-pulse">💭</span>
-        <span className="text-xs font-medium text-amber-700 dark:text-amber-400">Thinking...</span>
-        <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{lines.length} lines</span>
+        <span className="text-xs font-medium text-amber-700 dark:text-amber-400">思考中...</span>
+        <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{lines.length} 行</span>
       </div>
-      <div className="h-[5lh] overflow-hidden text-xs text-amber-800/70 dark:text-amber-300/60 font-mono leading-relaxed">
-        {visibleLines.map((line, i) => (
+      <div className="max-h-72 overflow-y-auto pr-1 text-xs text-amber-800/70 dark:text-amber-300/60 font-mono leading-relaxed whitespace-pre-wrap break-words">
+        {lines.map((line, i) => (
           <div
-            key={lines.length - 5 + i}
-            className="truncate"
-            style={{ opacity: 0.4 + (i / visibleLines.length) * 0.6 }}
+            key={`${i}-${line}`}
           >
             {line}
           </div>
@@ -712,29 +720,20 @@ function StreamingThinkingBlock({ content }: { content: string }) {
   )
 }
 
-/** Completed thinking: collapsed by default, click to expand */
+/** Completed thinking: keep it fully visible; the outer chat scroll owns scrolling. */
 function ThinkingBlock({ content }: { content: string }) {
-  const [expanded, setExpanded] = useState(false)
   const lines = content.split("\n").filter((l) => l.trim())
 
   return (
     <div className="mb-2 rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
-      <button
-        type="button"
-        onClick={() => setExpanded(!expanded)}
-        className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400 hover:bg-amber-100/50 dark:hover:bg-amber-900/20 transition-colors"
-      >
+      <div className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
         <span className="text-sm">💭</span>
-        <span className="font-medium">Thought for {lines.length} lines</span>
-        <span className="text-amber-600/60 dark:text-amber-500/60">
-          {expanded ? "▼" : "▶"}
-        </span>
-      </button>
-      {expanded && (
-        <div className="border-t border-amber-500/20 px-2.5 py-2 text-xs text-amber-800/80 dark:text-amber-300/70 whitespace-pre-wrap max-h-64 overflow-y-auto font-mono leading-relaxed">
-          {content}
-        </div>
-      )}
+        <span className="font-medium">思考过程</span>
+        <span className="text-[10px] text-amber-600/60 dark:text-amber-500/60">{lines.length} 行</span>
+      </div>
+      <div className="max-h-72 overflow-y-auto border-t border-amber-500/20 px-2.5 py-2 pr-1 text-xs text-amber-800/80 dark:text-amber-300/70 whitespace-pre-wrap break-words font-mono leading-relaxed">
+        {content}
+      </div>
     </div>
   )
 }

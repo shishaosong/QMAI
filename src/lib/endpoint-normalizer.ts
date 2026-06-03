@@ -17,7 +17,7 @@
  * gateways really do mount the API at a bare host.
  */
 
-export type EndpointMode = "chat_completions" | "anthropic_messages"
+export type EndpointMode = "chat_completions" | "responses" | "anthropic_messages"
 
 export interface NormalizedEndpoint {
   /** The cleaned-up URL to store. Empty string for empty input. */
@@ -31,7 +31,7 @@ export interface NormalizedEndpoint {
 // Path tails that are always wrong as a base URL and can be safely
 // stripped regardless of mode — these belong on the request, not on the
 // configured endpoint.
-const ALWAYS_WRONG_TAILS = /\/+(chat\/completions|embeddings)\/?$/i
+const ALWAYS_WRONG_TAILS = /\/+(chat\/completions|responses|embeddings)\/?$/i
 // `/messages` is ambiguous: in anthropic_messages mode our dispatch uses
 // it verbatim when present, so we must preserve it. Only strip when the
 // configured mode is chat_completions.
@@ -48,7 +48,7 @@ export function normalizeEndpoint(raw: string, mode: EndpointMode): NormalizedEn
     return {
       normalized: trimmed.replace(/\/+$/, ""),
       changed: trimmed !== trimmed.replace(/\/+$/, ""),
-      warning: "URL should start with http:// or https://",
+      warning: "接口地址需要以 http:// 或 https:// 开头。",
     }
   }
 
@@ -68,7 +68,7 @@ export function normalizeEndpoint(raw: string, mode: EndpointMode): NormalizedEn
     return {
       normalized: trimmed.replace(/\/+$/, ""),
       changed: trimmed !== trimmed.replace(/\/+$/, ""),
-      warning: "URL is not well-formed — check for typos in the host / port / path.",
+      warning: "接口地址格式不正确，请检查域名、端口或路径是否填写错误。",
     }
   }
 
@@ -87,7 +87,7 @@ export function normalizeEndpoint(raw: string, mode: EndpointMode): NormalizedEn
       })
     if (!validIpv4) {
       notes.push(
-        `Host "${host}" looks like an IPv4 address but has ${octets.length} octets (valid IPv4 has exactly 4, each 0-255).`,
+        `主机地址 "${host}" 看起来像 IPv4，但包含 ${octets.length} 段；正确 IPv4 应为 4 段，且每段在 0-255 之间。`,
       )
     }
   }
@@ -102,24 +102,24 @@ export function normalizeEndpoint(raw: string, mode: EndpointMode): NormalizedEn
   if (ALWAYS_WRONG_TAILS.test(url)) {
     const match = url.match(ALWAYS_WRONG_TAILS)
     url = url.replace(ALWAYS_WRONG_TAILS, "")
-    if (match) notes.push(`stripped trailing "${match[0].replace(/^\/+/, "").replace(/\/+$/, "")}" — this is appended per-request, not part of the base URL`)
+    if (match) notes.push(`已移除末尾的 "${match[0].replace(/^\/+/, "").replace(/\/+$/, "")}"；这部分会在请求时自动追加，不需要写在基础地址里。`)
   } else if (mode === "chat_completions" && MESSAGES_TAIL.test(url)) {
     const match = url.match(MESSAGES_TAIL)
     url = url.replace(MESSAGES_TAIL, "")
-    if (match) notes.push(`stripped trailing "${match[0].replace(/^\/+/, "").replace(/\/+$/, "")}" — this is an Anthropic-wire path, not a chat/completions base`)
+    if (match) notes.push(`已移除末尾的 "${match[0].replace(/^\/+/, "").replace(/\/+$/, "")}"；这是 Anthropic 兼容路径，不是 OpenAI 兼容基础地址。`)
   }
 
   // After stripping, check for the "bare host, no version segment" case.
   // Only hint for chat_completions — anthropic_messages endpoints sit at
   // various non-/v1 paths (MiniMax `/anthropic`, Anthropic native `/`)
   // and we can't reliably flag them.
-  if (mode === "chat_completions") {
+  if (mode === "chat_completions" || mode === "responses") {
     try {
       const u = new URL(url)
       const pathname = u.pathname.replace(/\/+$/, "")
       const hasVersionSegment = /\/(v\d+|paas\/v\d+|openai\/v\d+|api\/v\d+)$/i.test(pathname)
       if (!hasVersionSegment && !notes.length) {
-        notes.push('URL has no version segment (expected e.g. "/v1"). Double-check the provider\'s docs.')
+        notes.push("接口地址缺少版本路径，例如 /v1。请根据服务商文档确认正确的接口地址。")
       }
     } catch {
       // Malformed URL — leave alone, browser will fail loudly at fetch time.

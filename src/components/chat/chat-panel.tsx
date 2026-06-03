@@ -1,9 +1,10 @@
 import { useRef, useEffect, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Plus, Trash2, MessageSquare } from "lucide-react"
+import { BookOpen, Brain, Plus, Trash2, MessageSquare } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ChatMessage, StreamingMessage } from "./chat-message"
+import { ChatDockControls } from "./chat-dock-controls"
 import { setLastQueryPages, useSourceFiles } from "./chat-shared"
 import { ChatInput } from "./chat-input"
 import { useChatStore, chatMessagesToLLM } from "@/stores/chat-store"
@@ -21,6 +22,9 @@ import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import { isGreeting } from "@/lib/greeting-detector"
 import { computeContextBudget } from "@/lib/context-budget"
 import { getConversationTabTitle, sortConversationsByUpdatedAt } from "@/lib/workspace-layout"
+import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
+import { runDeepChapterGeneration, shouldUseDeepChapterGeneration } from "@/lib/novel/deep-chapter-generation"
+import { createDeepThinkingStreamRenderer } from "@/lib/deep-thinking-stream"
 
 function formatDate(timestamp: number): string {
   const d = new Date(timestamp)
@@ -30,6 +34,12 @@ function formatDate(timestamp: number): string {
     return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
   }
   return d.toLocaleDateString([], { month: "short", day: "numeric" })
+}
+
+export function getDeepChapterToggleButtonClass(enabled: boolean): string {
+  return enabled
+    ? "border-primary bg-primary text-primary-foreground shadow-sm hover:bg-primary/90 hover:text-primary-foreground"
+    : "text-muted-foreground hover:text-foreground"
 }
 
 function ConversationTabs() {
@@ -123,6 +133,7 @@ export function ChatPanel() {
   const mode = useChatStore((s) => s.mode)
   const addMessage = useChatStore((s) => s.addMessage)
   const setStreaming = useChatStore((s) => s.setStreaming)
+  const setStreamingContent = useChatStore((s) => s.setStreamingContent)
   const appendStreamToken = useChatStore((s) => s.appendStreamToken)
   const finalizeStream = useChatStore((s) => s.finalizeStream)
   const createConversation = useChatStore((s) => s.createConversation)
@@ -150,6 +161,7 @@ export function ChatPanel() {
   const [chapterSaveStatus, setChapterSaveStatus] = useState<string>("")
   const [isSavingChapter, setIsSavingChapter] = useState(false)
   const [pendingSoulDialog, setPendingSoulDialog] = useState({ open: false, summary: "" })
+  const [deepChapterEnabled, setDeepChapterEnabled] = useState(true)
 
   const closeSoulDialog = useCallback((confirmed: boolean) => {
     const resolver = soulDialogResolverRef.current
@@ -270,6 +282,48 @@ export function ChatPanel() {
       let queryRefs: { title: string; path: string }[] = []
       let langReminder: string | undefined
       const taskRoute = novelMode ? routeTask(text) : null
+      if (novelMode && project && shouldUseDeepChapterGeneration(taskRoute, deepChapterEnabled)) {
+        const controller = new AbortController()
+        abortRef.current = controller
+        const deepStream = createDeepThinkingStreamRenderer()
+        let accumulated = ""
+        const appendThinkingBlock = (content: string) => {
+          accumulated = deepStream.updateThinking(content)
+          setStreamingContent(accumulated)
+        }
+
+        try {
+          await runDeepChapterGeneration(
+            {
+              projectPath: normalizePath(project.path),
+              userRequest: text,
+              chapterNumber: taskRoute?.chapterNumber,
+              llmConfig,
+            },
+            {
+              onThinking: appendThinkingBlock,
+              onFinalContent: (content) => {
+                accumulated = deepStream.appendFinal(content)
+                setStreamingContent(accumulated)
+              },
+            },
+            undefined,
+            controller.signal,
+          )
+          finalizeStream(accumulated, [])
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err)
+          const existing = deepStream.getContent()
+          if (controller.signal.aborted || message === "已停止生成") {
+            finalizeStream(`${existing ? `${existing}\n\n` : ""}已停止生成。`, [])
+          } else {
+            finalizeStream(`${existing ? `${existing}\n\n` : ""}出错：深度生成章节失败：${message}`, undefined)
+          }
+        } finally {
+          abortRef.current = null
+        }
+        return
+      }
       const shouldUseQmQuaiSkill = taskRoute != null && (
         taskRoute.intent === "write_chapter" ||
         taskRoute.intent === "continue_chapter" ||
@@ -609,9 +663,10 @@ export function ChatPanel() {
           },
         },
         controller.signal,
+        { reasoning: resolveUserVisibleReasoning(llmConfig.reasoning) },
       )
     },
-    [llmConfig, addMessage, setStreaming, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages, requestSoulDialog],
+    [llmConfig, addMessage, setStreaming, setStreamingContent, appendStreamToken, finalizeStream, createConversation, maxHistoryMessages, requestSoulDialog, deepChapterEnabled],
   )
 
   const handleStop = useCallback(() => {
@@ -643,6 +698,11 @@ export function ChatPanel() {
     }
     handleSend(lastUserMsg.content)
   }, [isStreaming, removeLastAssistantMessage, handleSend])
+
+  const handleContinueNextChapter = useCallback(() => {
+    if (isStreaming) return
+    handleSend("请根据当前小说上下文、记忆库、最新章节结尾、下一章推进建议和章纲，继续生成下一章正文。只输出可直接保存到章节库的小说正文，不要解释，不要列提纲。正文必须是完整章节，目标约 3000 字，建议 2800-3300 字，低于 2600 字视为未完成。")
+  }, [handleSend, isStreaming])
 
   const handleWriteToWiki = useCallback(async () => {
     if (!project) return
@@ -696,6 +756,7 @@ export function ChatPanel() {
                       novelMode={novelMode}
                       projectPath={project?.path ?? null}
                       onSaveAsChapter={handleSaveAsChapter}
+                      onContinueNextChapter={isLastAssistant ? handleContinueNextChapter : undefined}
                       saveStatus={chapterSaveStatus}
                       isSaving={isSavingChapter}
                     />
@@ -727,6 +788,25 @@ export function ChatPanel() {
             onSend={handleSend}
             onStop={handleStop}
             isStreaming={isStreaming}
+            leadingControls={
+              <div className="flex items-center gap-1">
+                <ChatDockControls />
+                {novelMode ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-pressed={deepChapterEnabled}
+                    className={getDeepChapterToggleButtonClass(deepChapterEnabled)}
+                    onClick={() => setDeepChapterEnabled((enabled) => !enabled)}
+                    title={deepChapterEnabled ? "深度章节生成已开启" : "深度章节生成已关闭"}
+                    aria-label={deepChapterEnabled ? "关闭深度章节生成" : "开启深度章节生成"}
+                  >
+                    <Brain className="h-4 w-4" />
+                  </Button>
+                ) : null}
+              </div>
+            }
             placeholder={
               mode === "ingest"
                 ? t(novelMode ? "novel.chat.ingestPlaceholder" : "chat.ingestPlaceholder")

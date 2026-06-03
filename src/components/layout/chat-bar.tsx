@@ -5,9 +5,10 @@ import { getChatBarVisibility } from "./chat-layout"
 
 export function ChatBar() {
   const chatExpanded = useWikiStore((s) => s.chatExpanded)
+  const chatDockPosition = useWikiStore((s) => s.chatDockPosition)
   const setChatExpanded = useWikiStore((s) => s.setChatExpanded)
 
-  if (getChatBarVisibility(chatExpanded) === "hidden") {
+  if (getChatBarVisibility(chatExpanded, chatDockPosition) === "hidden") {
     return null
   }
 

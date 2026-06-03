@@ -1,6 +1,6 @@
 import { Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useLayoutEffect } from "react"
 import { useTranslation } from "react-i18next"
-import { Check, X } from "lucide-react"
+import { Check, MoreHorizontal, X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
 import type { FinalChapterSavePhase } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
@@ -24,6 +24,7 @@ import { buildDeAiRewriteMessages } from "@/lib/novel/de-ai-adapter"
 import { startOutlineIngestTask } from "@/lib/novel/outline-generation"
 import { streamChat } from "@/lib/llm-client"
 import { makeChapterFileName, makeDefaultChapterTitle } from "@/lib/wiki-filename"
+import { getPreviewContentContainerClass, shouldUseCompactChapterToolbar } from "@/lib/workspace-layout"
 import { useOutlineGenerationStore, type OutlineGenerationTask } from "@/stores/outline-generation-store"
 import {
   buildPolishSelectionMessages,
@@ -188,6 +189,8 @@ export function PreviewPanel() {
   const [chapterTitleDraft, setChapterTitleDraft] = useState("")
   const [chapterTitleEditing, setChapterTitleEditing] = useState(false)
   const [chapterTitleWidthPx, setChapterTitleWidthPx] = useState(CHAPTER_TITLE_MIN_WIDTH_PX)
+  const [chapterToolbarCompact, setChapterToolbarCompact] = useState(true)
+  const [chapterToolbarMoreOpen, setChapterToolbarMoreOpen] = useState(false)
   const [loadedFilePath, setLoadedFilePath] = useState<string | null>(null)
   // Snapshot of what was most recently loaded from disk. Milkdown re-emits
   // `markdownUpdated` on initial parse (before the user types anything),
@@ -197,6 +200,7 @@ export function PreviewPanel() {
   const lastLoadedRef = useRef<string>("")
   const fileContentRef = useRef(fileContent)
   const selectedFileRef = useRef<string | null>(selectedFile)
+  const chapterToolbarRef = useRef<HTMLDivElement | null>(null)
   const titleMeasureRef = useRef<HTMLSpanElement | null>(null)
 
   useEffect(() => {
@@ -410,6 +414,7 @@ export function PreviewPanel() {
     saving: t("novel.chapter.savingAsFinal"),
     reviewing: t("novel.chapter.reviewInProgress"),
     saved: t("novel.chapter.savedAsFinal"),
+    reingesting: t("novel.chapter.savingAsFinal"),
     ingested: t("novel.chapter.ingestSuccess"),
     blocked_by_review: t("novel.chapter.reviewBlockedWithErrors"),
     ingest_failed: t("novel.chapter.ingestFailedRetry"),
@@ -491,6 +496,31 @@ export function PreviewPanel() {
     const nextWidth = Math.max(measuredWidth + extraWidth, CHAPTER_TITLE_MIN_WIDTH_PX)
     setChapterTitleWidthPx((currentWidth) => currentWidth === nextWidth ? currentWidth : nextWidth)
   }, [chapterHeader, chapterTitleEditing, chapterTitleMeasureText])
+
+  useLayoutEffect(() => {
+    const element = chapterToolbarRef.current
+    if (!element) return
+
+    const update = () => {
+      setChapterToolbarCompact(shouldUseCompactChapterToolbar(element.getBoundingClientRect().width))
+    }
+
+    update()
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update)
+      return () => window.removeEventListener("resize", update)
+    }
+
+    const observer = new ResizeObserver(update)
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [chapterHeader, loadedFilePath, selectedFile])
+
+  useEffect(() => {
+    if (!chapterToolbarCompact) {
+      setChapterToolbarMoreOpen(false)
+    }
+  }, [chapterToolbarCompact])
 
   const normalizeChapterTitleInput = useCallback((title: string) => {
     const trimmed = title.trim()
@@ -633,22 +663,28 @@ export function PreviewPanel() {
       setSaveStatus(t("novel.chapter.reingestNotFinal"))
       return
     }
-    setFinalChapterSave(null)
+    const projectPath = project.path
+    const filePath = selectedFile
+    const updatePhase = (saving: boolean, phase: FinalChapterSavePhase | null, params?: Record<string, string | number>) => {
+      setFinalChapterSave({ projectPath, filePath, saving, phase: phase ?? null, params })
+    }
+
     setIsSavingFinal(true)
+    updatePhase(true, "reingesting")
     setSaveStatus("")
     try {
       const { ingestChapter } = await import("@/lib/novel/chapter-ingest")
-      const result = await ingestChapter(project.path, selectedFile, resolveReviewModel())
+      const result = await ingestChapter(projectPath, filePath, resolveReviewModel())
       if (result.snapshot) {
-        setSaveStatus(t("novel.chapter.ingestSuccess", { chapter: result.snapshot.chapterNumber }))
+        updatePhase(false, "ingested", { chapter: result.snapshot.chapterNumber })
       } else if (result.failReason === "invalid_chapter_number") {
-        setSaveStatus("快照生成失败：章节编号无效，请检查章节的 chapter_number 设置")
+        updatePhase(false, "ingest_no_chapter_number")
       } else {
-        setSaveStatus(t("novel.chapter.ingestFailedRetry"))
+        updatePhase(false, "ingest_failed")
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      setSaveStatus(t("novel.chapter.ingestError", { message }))
+      updatePhase(false, "ingest_failed", { message: message.slice(0, 100) })
     } finally {
       setIsSavingFinal(false)
     }
@@ -873,7 +909,16 @@ export function PreviewPanel() {
   }
 
   const category = getFileCategory(selectedFile)
+  const isSelectedChapter = isChapterPath(selectedFile)
   const activeHighlightRequest = pendingEditorHighlight?.path === selectedFile ? pendingEditorHighlight : null
+  const hasChapterToolbarActions = Boolean(
+    chapterHeader ||
+    canIngestOutline ||
+    canSaveAsFinal ||
+    canFormatWriting ||
+    canViewSnapshot ||
+    (novelMode && project)
+  )
 
   if (loadedFilePath !== selectedFile) {
     return (
@@ -886,8 +931,8 @@ export function PreviewPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="border-b px-3 py-1.5">
-        <div className="flex items-center gap-2">
-          <div className="relative flex min-w-0 shrink items-center gap-1 overflow-hidden">
+        <div ref={chapterToolbarRef} className="flex min-w-0 items-center gap-2">
+          <div className="relative flex min-w-0 flex-1 items-center gap-1 overflow-hidden">
             {chapterHeader ? (
               <>
                 <span
@@ -924,16 +969,150 @@ export function PreviewPanel() {
                       e.currentTarget.blur()
                     }
                   }}
-                  className="max-w-full shrink border-0 bg-transparent p-0 text-2xl font-bold leading-10 text-foreground outline-none"
-                  style={{ width: `${chapterTitleWidthPx}px`, fontFamily: "inherit" }}
+                  className="min-w-[4rem] shrink truncate border-0 bg-transparent p-0 text-2xl font-bold leading-10 text-foreground outline-none"
+                  style={{
+                    width: `${chapterTitleWidthPx}px`,
+                    maxWidth: chapterToolbarCompact ? "12rem" : "min(28rem, 100%)",
+                    fontFamily: "inherit",
+                  }}
+                  title={chapterDisplayTitle}
                   spellCheck={false}
                 />
                 {chapterMeta}
               </>
             ) : null}
           </div>
-          <div className="ml-auto flex items-center justify-end gap-1">
-          {chapterHeader ? (
+          <div className="relative ml-auto flex shrink-0 items-center justify-end gap-1">
+          {chapterToolbarCompact && hasChapterToolbarActions ? (
+            <div className="relative shrink-0">
+              <button
+                type="button"
+                onClick={() => setChapterToolbarMoreOpen((open) => !open)}
+                className="rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
+                title="更多功能"
+                aria-label="更多功能"
+              >
+                <MoreHorizontal className="h-3.5 w-3.5" />
+              </button>
+              {chapterToolbarMoreOpen ? (
+                <div className="absolute right-0 top-8 z-30 w-40 rounded-md border bg-popover p-1 text-xs text-popover-foreground shadow-lg">
+                  {chapterHeader ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        setChatExpanded(getNextChatExpanded(chatExpanded))
+                      }}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                    >
+                      {chatExpanded ? t("preview.closeChatSession", { defaultValue: "关闭会话栏" }) : t("preview.openChatSession", { defaultValue: "打开会话栏" })}
+                    </button>
+                  ) : null}
+                  {chapterHeader ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        void handleDeAiProcess()
+                      }}
+                      disabled={deAiProcessing}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {deAiProcessing ? "处理中" : "去AI味"}
+                    </button>
+                  ) : null}
+                  {canIngestOutline ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        void handleIngestOutline()
+                      }}
+                      disabled={isOutlineIngesting}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isOutlineIngesting ? t("novel.outlineGenerator.ingesting") : outlineIngested ? "已提取记忆" : t("novel.outlineGenerator.ingest")}
+                    </button>
+                  ) : null}
+                  {canIngestOutline && outlineIngested && outlineSnapshotNumber !== null ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        setShowOutlineSnapshot(true)
+                      }}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                    >
+                      {t("novel.snapshot.viewButton")}
+                    </button>
+                  ) : null}
+                  {canSaveAsFinal && !alreadyFinal ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        void handleSaveAsFinal()
+                      }}
+                      disabled={isFinalChapterSaving}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isFinalChapterSaving ? t("novel.chapter.savingAsFinal") : t("novel.chapter.saveAsCanon")}
+                    </button>
+                  ) : null}
+                  {canSaveAsFinal && alreadyFinal ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        void handleReingest()
+                      }}
+                      disabled={isFinalChapterSaving}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {isFinalChapterSaving ? t("novel.chapter.savingAsFinal") : t("novel.chapter.reingestButton")}
+                    </button>
+                  ) : null}
+                  {canFormatWriting ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        void handleFormatWriting()
+                      }}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                    >
+                      {t("preview.formatWriting", { defaultValue: "一键排版" })}
+                    </button>
+                  ) : null}
+                  {canViewSnapshot ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        setShowSnapshot(true)
+                      }}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                    >
+                      {t("novel.snapshot.viewButton")}
+                    </button>
+                  ) : null}
+                  {novelMode && project ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setChapterToolbarMoreOpen(false)
+                        setShowCognition(true)
+                      }}
+                      className="block w-full rounded px-2 py-1.5 text-left hover:bg-accent"
+                    >
+                      {t("novel.cognition.title")}
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {!chapterToolbarCompact && chapterHeader ? (
             <button
               type="button"
               onClick={() => setChatExpanded(getNextChatExpanded(chatExpanded))}
@@ -945,7 +1124,7 @@ export function PreviewPanel() {
               {t("preview.chatSession", { defaultValue: "AI会话" })}
             </button>
           ) : null}
-          {chapterHeader ? (
+          {!chapterToolbarCompact && chapterHeader ? (
             <div className="relative shrink-0">
               <button
                 type="button"
@@ -957,7 +1136,7 @@ export function PreviewPanel() {
               </button>
             </div>
           ) : null}
-          {canIngestOutline ? (
+          {!chapterToolbarCompact && canIngestOutline ? (
             <button
               type="button"
               onClick={() => void handleIngestOutline()}
@@ -972,17 +1151,17 @@ export function PreviewPanel() {
               {isOutlineIngesting ? t("novel.outlineGenerator.ingesting") : outlineIngested ? "✓ 已提取记忆" : t("novel.outlineGenerator.ingest")}
             </button>
           ) : null}
-          {canIngestOutline && outlineIngested && outlineSnapshotNumber !== null ? (
+          {!chapterToolbarCompact && canIngestOutline && outlineIngested && outlineSnapshotNumber !== null ? (
             <button
               type="button"
               onClick={() => setShowOutlineSnapshot(true)}
               className="shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
               title="查看该大纲提取的快照详情"
             >
-              查看快照
+              {t("novel.snapshot.viewButton")}
             </button>
           ) : null}
-          {canSaveAsFinal && !alreadyFinal ? (
+          {!chapterToolbarCompact && canSaveAsFinal && !alreadyFinal ? (
             <button
               type="button"
               onClick={() => void handleSaveAsFinal()}
@@ -993,18 +1172,18 @@ export function PreviewPanel() {
               {isFinalChapterSaving ? t("novel.chapter.savingAsFinal") : t("novel.chapter.saveAsCanon")}
             </button>
           ) : null}
-          {canSaveAsFinal && alreadyFinal ? (
+          {!chapterToolbarCompact && canSaveAsFinal && alreadyFinal ? (
             <button
               type="button"
               onClick={() => void handleReingest()}
-              disabled={isSavingFinal}
+              disabled={isFinalChapterSaving}
               className="shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent disabled:cursor-not-allowed disabled:opacity-50"
               title={t("preview.reingestTitle")}
             >
-              {isSavingFinal ? t("novel.chapter.savingAsFinal") : t("novel.chapter.reingestButton")}
+              {isFinalChapterSaving ? t("novel.chapter.savingAsFinal") : t("novel.chapter.reingestButton")}
             </button>
           ) : null}
-          {canFormatWriting ? (
+          {!chapterToolbarCompact && canFormatWriting ? (
             <button
               type="button"
               onClick={() => void handleFormatWriting()}
@@ -1014,7 +1193,7 @@ export function PreviewPanel() {
               {t("preview.formatWriting", { defaultValue: "一键排版" })}
             </button>
           ) : null}
-          {canViewSnapshot ? (
+          {!chapterToolbarCompact && canViewSnapshot ? (
             <button
               type="button"
               onClick={() => setShowSnapshot(true)}
@@ -1024,7 +1203,7 @@ export function PreviewPanel() {
               {t("novel.snapshot.viewButton")}
             </button>
           ) : null}
-          {novelMode && project ? (
+          {!chapterToolbarCompact && novelMode && project ? (
             <button
               type="button"
               onClick={() => setShowCognition(true)}
@@ -1050,7 +1229,7 @@ export function PreviewPanel() {
           </div>
         ) : null}
       </div>
-      <div className="flex-1 min-w-0 overflow-auto">
+      <div className={getPreviewContentContainerClass(isSelectedChapter)}>
         {category === "markdown" ? (
           <WikiEditor
             key={selectedFile}

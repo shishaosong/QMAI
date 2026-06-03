@@ -12,6 +12,8 @@ import { clampSidebarWidth } from "@/lib/workspace-layout"
 import { useTranslation } from "react-i18next"
 import { HelpCircle, X } from "lucide-react"
 
+const USAGE_GUIDE_PROMPT_DISMISSED_KEY = "qmai-usage-guide-prompt-dismissed"
+
 interface AppLayoutProps {
   onSwitchProject: () => void
 }
@@ -27,7 +29,10 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
   const removeOutlineTask = useOutlineGenerationStore((s: OutlineGenerationState) => s.removeTask)
   const [leftWidth, setLeftWidth] = useState(220)
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false)
-  const [usageGuidePromptDismissed, setUsageGuidePromptDismissed] = useState(false)
+  const [usageGuidePromptDismissed, setUsageGuidePromptDismissed] = useState(() => {
+    if (typeof localStorage === "undefined") return false
+    return localStorage.getItem(USAGE_GUIDE_PROMPT_DISMISSED_KEY) === "1"
+  })
   const isDraggingLeft = useRef(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const latestOutlineTask = outlineTasks
@@ -104,6 +109,11 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
     localStorage.setItem("lk-sidebar-collapsed", sidebarCollapsed ? "1" : "0")
   }, [sidebarCollapsed])
 
+  const dismissUsageGuidePrompt = useCallback(() => {
+    setUsageGuidePromptDismissed(true)
+    localStorage.setItem(USAGE_GUIDE_PROMPT_DISMISSED_KEY, "1")
+  }, [])
+
   return (
     <div className="flex h-screen flex-col bg-background text-foreground">
       {latestOutlineTask && (
@@ -171,7 +181,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
         <div className="fixed bottom-4 left-14 z-50 w-56 rounded-lg border border-primary/40 bg-background/95 p-3 shadow-xl backdrop-blur">
           <button
             type="button"
-            onClick={() => setUsageGuidePromptDismissed(true)}
+            onClick={dismissUsageGuidePrompt}
             className="absolute right-2 top-2 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
             title="关闭"
             aria-label="关闭软件使用说明提示"
@@ -181,6 +191,7 @@ export function AppLayout({ onSwitchProject }: AppLayoutProps) {
           <button
             type="button"
             onClick={() => {
+              dismissUsageGuidePrompt()
               setActiveSettingsCategory("usage-guide")
               setActiveView("settings")
             }}

@@ -15,7 +15,7 @@ import type { CustomApiMode, LlmConfig, RerankConfig } from "@/stores/wiki-store
 
 const SILICONFLOW_RESOURCE_URL = "https://cloud.siliconflow.cn/i/1lKTd7hi"
 
-function normalizeRerankEndpoint(raw: string, mode: "chat_completions" | "anthropic_messages") {
+function normalizeRerankEndpoint(raw: string, mode: CustomApiMode) {
   const trimmed = (raw ?? "").trim()
   if (/^https?:\/\//i.test(trimmed) && /\/rerank\/?$/i.test(trimmed)) {
     const normalized = trimmed.replace(/\/+$/, "")
@@ -418,7 +418,7 @@ function RerankEndpointField({
   onChange,
 }: {
   value: string
-  mode: "chat_completions" | "anthropic_messages"
+  mode: CustomApiMode
   placeholder: string
   onChange: (value: string) => void
 }) {

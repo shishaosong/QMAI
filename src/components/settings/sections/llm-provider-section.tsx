@@ -291,6 +291,7 @@ function PresetRow({
                 {(
                   [
                     { value: "chat_completions", labelKey: "settings.sections.llm.wireOpenAi" },
+                    { value: "responses", labelKey: "settings.sections.llm.wireResponses" },
                     { value: "anthropic_messages", labelKey: "settings.sections.llm.wireAnthropic" },
                   ] as const
                 ).map((m) => {
@@ -310,6 +311,9 @@ function PresetRow({
                         if (nextBaseUrl) patch.baseUrl = nextBaseUrl
                         onChange(patch)
                       }}
+                      title={m.value === "responses"
+                        ? "Responses API：用于 OpenAI 新接口。接口地址填写 /v1 基础地址，程序会自动请求 /responses；模型填写支持 Responses 的模型 ID。"
+                        : undefined}
                       className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
                         active
                           ? "border-primary bg-primary text-primary-foreground"
@@ -321,6 +325,11 @@ function PresetRow({
                   )
                 })}
               </div>
+              {apiMode === "responses" ? (
+                <p className="text-xs leading-relaxed text-muted-foreground">
+                  Responses API 使用方法：接口地址填写例如 https://api.openai.com/v1 或兼容服务的 /v1 基础地址，模型填写支持 Responses 的模型 ID。程序会自动发送到 /responses，并读取流式返回。
+                </p>
+              ) : null}
             </div>
           )}
 
@@ -476,7 +485,7 @@ function ReasoningControls({
 
 interface EndpointFieldProps {
   value: string
-  mode: "chat_completions" | "anthropic_messages"
+  mode: "chat_completions" | "responses" | "anthropic_messages"
   placeholder: string
   onChange: (value: string) => void
 }

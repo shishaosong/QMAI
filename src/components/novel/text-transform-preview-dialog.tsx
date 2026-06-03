@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
 
 interface TextTransformPreviewDialogProps {
   open: boolean
@@ -20,6 +21,7 @@ interface TextTransformPreviewDialogProps {
   secondaryActionLabel?: string
   applyDisabled?: boolean
   secondaryActionDisabled?: boolean
+  onCandidateContentChange?: (content: string) => void
   onApply: () => void
   onSecondaryAction?: () => void
   onClose: () => void
@@ -37,6 +39,7 @@ export function TextTransformPreviewDialog({
   secondaryActionLabel,
   applyDisabled = false,
   secondaryActionDisabled = false,
+  onCandidateContentChange,
   onApply,
   onSecondaryAction,
   onClose,
@@ -57,9 +60,17 @@ export function TextTransformPreviewDialog({
           </div>
           <div className="flex min-h-0 flex-col gap-2">
             <div className="text-xs font-medium text-muted-foreground">{candidateLabel}</div>
-            <div className="max-h-96 overflow-y-auto rounded-md border bg-muted/20 p-3 text-sm leading-6 whitespace-pre-wrap">
-              {candidateContent}
-            </div>
+            {onCandidateContentChange ? (
+              <Textarea
+                className="min-h-40 max-h-96 resize-y overflow-y-auto bg-muted/20 text-sm leading-6 whitespace-pre-wrap"
+                value={candidateContent}
+                onChange={(event) => onCandidateContentChange(event.target.value)}
+              />
+            ) : (
+              <div className="max-h-96 overflow-y-auto rounded-md border bg-muted/20 p-3 text-sm leading-6 whitespace-pre-wrap">
+                {candidateContent}
+              </div>
+            )}
           </div>
         </div>
         <DialogFooter>

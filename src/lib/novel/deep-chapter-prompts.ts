@@ -1,0 +1,167 @@
+import type { NovelReviewResult } from "./review-adapter"
+
+export const DEEP_CHAPTER_TARGET_CHARS = 3000
+export const DEEP_CHAPTER_MIN_CHARS = 2600
+export const DEEP_CHAPTER_LENGTH_RANGE = "2800-3300 字"
+export const DEEP_CHAPTER_HARD_MAX_CHARS = 4500
+export const DEEP_CHAPTER_MAX_OUTPUT_TOKENS = 8000
+
+export function buildDeepChapterBriefPrompt(contextPrompt: string, userRequest: string, chapterNumber?: number): string {
+  return [
+    "你是小说写作任务规划助手。",
+    "请基于上下文输出一份写作任务书，供后续创作使用。",
+    "",
+    "硬性要求：",
+    "1. 只输出任务书，不要写故事片段。",
+    "2. 必须列出本章必须完成、禁止违背、角色状态、伏笔推进、结尾钩子。",
+    "3. 如果上下文不足，写明缺失项，并给出最小补全方向。",
+    `4. 后续正文必须按完整章节规划，目标约 ${DEEP_CHAPTER_TARGET_CHARS} 字，建议控制在 ${DEEP_CHAPTER_LENGTH_RANGE}；低于 ${DEEP_CHAPTER_MIN_CHARS} 字视为未完成。`,
+    "5. 任务书必须规划足够的场景推进、冲突升级、人物互动、细节描写和结尾钩子，避免只写一个短场景。",
+    "",
+    chapterNumber ? `目标章节：第${chapterNumber}章` : "目标章节：用户请求中的章节",
+    `用户请求：${userRequest}`,
+    "",
+    "上下文：",
+    contextPrompt,
+  ].join("\n")
+}
+
+export function buildDeepChapterDraftPrompt(contextPrompt: string, taskBrief: string, userRequest: string, chapterNumber?: number): string {
+  return [
+    "你是专业小说正文写作助手。",
+    "请严格根据上下文和写作任务书起草章节正文。",
+    "",
+    "输出要求：",
+    "1. 只输出可直接保存到章节库的小说正文。",
+    "2. 不要输出分析、任务书、审稿说明、引用来源或后续建议。",
+    "3. 严格承接上一章结尾，遵守大纲、记忆、人设、伏笔和时间线。",
+    "4. 结尾必须留下适合下一章继续推进的钩子。",
+    `5. 字数必须接近完整章节长度：目标约 ${DEEP_CHAPTER_TARGET_CHARS} 字，建议 ${DEEP_CHAPTER_LENGTH_RANGE}；低于 ${DEEP_CHAPTER_MIN_CHARS} 字视为未完成，不能提前收尾。`,
+    "6. 必须写成完整章节，不要只写一个片段；需要包含场景铺陈、行动推进、对话交锋、情绪变化、冲突升级和结尾钩子。",
+    "7. 禁止复读、循环输出、重复同一段落或用相同句式堆字数；写到完整结尾后立即停止。",
+    "",
+    chapterNumber ? `目标章节：第${chapterNumber}章` : "目标章节：用户请求中的章节",
+    `用户请求：${userRequest}`,
+    "",
+    "写作任务书：",
+    taskBrief,
+    "",
+    "上下文：",
+    contextPrompt,
+  ].join("\n")
+}
+
+export function buildDeepChapterRevisionPrompt(
+  contextPrompt: string,
+  taskBrief: string,
+  draftContent: string,
+  reviewResults: NovelReviewResult[],
+  userRequest: string,
+  chapterNumber?: number,
+): string {
+  return [
+    "你是小说正文返修助手。",
+    "请根据审稿问题返修章节正文。",
+    "",
+    "硬性要求：",
+    "1. 只输出返修后的小说正文。",
+    "2. 不要输出解释、审稿说明、修改清单或后续建议。",
+    "3. 优先修复审稿指出的问题，不要无关改写。",
+    "4. 必须继续遵守写作任务书和上下文。",
+    `5. 返修后仍必须保持完整章节长度：目标约 ${DEEP_CHAPTER_TARGET_CHARS} 字，建议 ${DEEP_CHAPTER_LENGTH_RANGE}；低于 ${DEEP_CHAPTER_MIN_CHARS} 字视为未完成。`,
+    "6. 禁止复读、循环输出、重复同一段落或用相同句式堆字数；写到完整结尾后立即停止。",
+    "",
+    chapterNumber ? `目标章节：第${chapterNumber}章` : "目标章节：用户请求中的章节",
+    `用户请求：${userRequest}`,
+    "",
+    "写作任务书：",
+    taskBrief,
+    "",
+    "审稿问题：",
+    formatReviewIssues(reviewResults),
+    "",
+    "原始初稿：",
+    draftContent,
+    "",
+    "上下文：",
+    contextPrompt,
+  ].join("\n")
+}
+
+export function buildDeepChapterExpansionPrompt(
+  contextPrompt: string,
+  taskBrief: string,
+  currentContent: string,
+  userRequest: string,
+  chapterNumber?: number,
+): string {
+  return [
+    "你是小说正文扩写补足助手。",
+    "当前章节正文明显过短，请在不推翻已有内容的前提下扩写补足为完整章节。",
+    "",
+    "硬性要求：",
+    "1. 只输出扩写补足后的完整小说正文。",
+    "2. 必须保留并自然融合原有正文的有效内容，不要输出解释、分析或修改说明。",
+    `3. 字数目标约 ${DEEP_CHAPTER_TARGET_CHARS} 字，建议 ${DEEP_CHAPTER_LENGTH_RANGE}；低于 ${DEEP_CHAPTER_MIN_CHARS} 字视为未完成。`,
+    "4. 扩写时补足场景铺陈、动作细节、对话交锋、心理变化、冲突升级和结尾钩子。",
+    "5. 必须严格遵守写作任务书、上下文、人物状态、伏笔和时间线，不要新增会推翻设定的剧情。",
+    "6. 禁止复读、循环输出、重复同一段落或用相同句式堆字数；写到完整结尾后立即停止。",
+    "",
+    chapterNumber ? `目标章节：第${chapterNumber}章` : "目标章节：用户请求中的章节",
+    `用户请求：${userRequest}`,
+    "",
+    "写作任务书：",
+    taskBrief,
+    "",
+    "当前过短正文：",
+    currentContent,
+    "",
+    "上下文：",
+    contextPrompt,
+  ].join("\n")
+}
+
+export function buildDeepChapterFinalPolishPrompt(
+  contextPrompt: string,
+  taskBrief: string,
+  currentContent: string,
+  userRequest: string,
+  chapterNumber?: number,
+): string {
+  return [
+    "你是小说正文最终质检与去AI味助手。",
+    "请对二次审查/返修后的章节做最后一遍简单审查，并进行去AI味处理。",
+    "",
+    "处理目标：",
+    "1. 检查是否存在明显复读、循环段落、前后矛盾、突兀跳转、解释腔和机械套话。",
+    "2. 去掉 AI 味：减少总结腔、模板句、过度解释、相同句式堆叠和空泛形容。",
+    "3. 保留原有剧情事实、人物关系、时间线、伏笔和章节结尾钩子，不要另起新剧情。",
+    "4. 只做必要的自然化、顺滑化和轻量修补，不要大幅重写。",
+    `5. 最终正文仍应接近 ${DEEP_CHAPTER_LENGTH_RANGE}；禁止为了凑字数复读。`,
+    "6. 只输出最终可保存的小说正文，不要输出审查报告、解释、标题或修改说明。",
+    "",
+    chapterNumber ? `目标章节：第${chapterNumber}章` : "目标章节：用户请求中的章节",
+    `用户请求：${userRequest}`,
+    "",
+    "写作任务书：",
+    taskBrief,
+    "",
+    "待最终简单审查与去AI味正文：",
+    currentContent,
+    "",
+    "上下文：",
+    contextPrompt,
+  ].join("\n")
+}
+
+function formatReviewIssues(reviewResults: NovelReviewResult[]): string {
+  if (reviewResults.length === 0) return "未发现问题。"
+  return reviewResults
+    .map((item, index) => [
+      `${index + 1}. [${item.severity}] ${item.message}`,
+      item.evidence ? `证据：${item.evidence}` : "",
+      item.relatedMemory ? `相关记忆：${item.relatedMemory}` : "",
+      item.suggestion ? `建议：${item.suggestion}` : "",
+    ].filter(Boolean).join("\n"))
+    .join("\n\n")
+}

@@ -34,6 +34,36 @@ interface GroupUiEntry {
   skipped: boolean
 }
 
+interface MaintenanceScanState {
+  projectPath: string | null
+  scanning: boolean
+  scanError: string | null
+  groups: GroupUiEntry[]
+  scanCompleted: boolean
+}
+
+const emptyScanState: MaintenanceScanState = {
+  projectPath: null,
+  scanning: false,
+  scanError: null,
+  groups: [],
+  scanCompleted: false,
+}
+
+let sharedScanState: MaintenanceScanState = emptyScanState
+const scanListeners = new Set<(state: MaintenanceScanState) => void>()
+
+function setSharedScanState(patch: Partial<MaintenanceScanState>): void {
+  sharedScanState = { ...sharedScanState, ...patch }
+  for (const listener of scanListeners) listener(sharedScanState)
+}
+
+function subscribeScanState(listener: (state: MaintenanceScanState) => void): () => void {
+  scanListeners.add(listener)
+  listener(sharedScanState)
+  return () => scanListeners.delete(listener)
+}
+
 /** Match a card to its task in the queue (if any) by slug-set. */
 function findTaskForGroup(
   tasks: readonly DedupTask[],
@@ -48,10 +78,9 @@ export function MaintenanceSection() {
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const project = useWikiStore((s) => s.project)
 
-  const [scanning, setScanning] = useState(false)
-  const [scanError, setScanError] = useState<string | null>(null)
-  const [groups, setGroups] = useState<GroupUiEntry[]>([])
-  const [scanCompleted, setScanCompleted] = useState(false)
+  const [scanState, setScanState] = useState<MaintenanceScanState>(sharedScanState)
+
+  useEffect(() => subscribeScanState(setScanState), [])
 
   // Poll the queue at 1Hz so the UI reflects pending → processing →
   // failed transitions and cross-window queue activity (e.g. a merge
@@ -66,35 +95,44 @@ export function MaintenanceSection() {
 
   const llmReady = hasUsableLlm(llmConfig)
   const projectReady = !!project
+  const projectScanState = project && scanState.projectPath === project.path ? scanState : emptyScanState
+  const { scanning, scanError, groups, scanCompleted } = projectScanState
 
   const handleScan = useCallback(async () => {
     if (!project) return
-    setScanning(true)
-    setScanError(null)
-    setGroups([])
-    setScanCompleted(false)
+    setSharedScanState({
+      projectPath: project.path,
+      scanning: true,
+      scanError: null,
+      groups: [],
+      scanCompleted: false,
+    })
     try {
       const detected = await runDuplicateDetection(project.path, llmConfig)
-      setGroups(
-        detected.map((g) => ({
+      setSharedScanState({
+        projectPath: project.path,
+        groups: detected.map((g) => ({
           group: g,
           canonicalSlug: g.slugs[0],
           skipped: false,
         })),
-      )
-      setScanCompleted(true)
+        scanCompleted: true,
+      })
     } catch (err) {
-      setScanError(err instanceof Error ? err.message : String(err))
+      setSharedScanState({
+        projectPath: project.path,
+        scanError: err instanceof Error ? err.message : String(err),
+      })
     } finally {
-      setScanning(false)
+      setSharedScanState({ projectPath: project.path, scanning: false })
     }
   }, [project, llmConfig])
 
   const handleCanonicalChange = useCallback(
     (idx: number, slug: string) => {
-      setGroups((prev) =>
-        prev.map((g, i) => (i === idx ? { ...g, canonicalSlug: slug } : g)),
-      )
+      setSharedScanState({
+        groups: sharedScanState.groups.map((g, i) => (i === idx ? { ...g, canonicalSlug: slug } : g)),
+      })
     },
     [],
   )
@@ -131,9 +169,9 @@ export function MaintenanceSection() {
       if (!entry) return
       try {
         await addNotDuplicate(project.path, entry.group.slugs)
-        setGroups((prev) =>
-          prev.map((g, i) => (i === idx ? { ...g, skipped: true } : g)),
-        )
+        setSharedScanState({
+          groups: sharedScanState.groups.map((g, i) => (i === idx ? { ...g, skipped: true } : g)),
+        })
       } catch (err) {
         console.error("[Maintenance] addNotDuplicate failed:", err)
       }

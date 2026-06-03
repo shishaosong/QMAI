@@ -1,4 +1,4 @@
-export type CustomApiMode = "chat_completions" | "anthropic_messages"
+export type CustomApiMode = "chat_completions" | "responses" | "anthropic_messages"
 
 export type Provider =
   | "openai"
