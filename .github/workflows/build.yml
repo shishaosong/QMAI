@@ -148,6 +148,8 @@ jobs:
         if: github.event_name == 'push' && matrix.label == 'windows-x64'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
@@ -162,7 +164,13 @@ jobs:
 
           $signaturePath = "$($installer.FullName).sig"
           if (-not (Test-Path $signaturePath)) {
-            throw "未找到 Windows 安装包签名文件：$signaturePath"
+            npx tauri signer sign $installer.FullName
+            if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+            }
+          }
+          if (-not (Test-Path $signaturePath)) {
+            throw "Windows 安装包签名生成失败：$signaturePath"
           }
 
           $releaseDir = "release-assets"
