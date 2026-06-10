@@ -80,4 +80,25 @@ describe("custom provider headers", () => {
       Origin: "",
     })
   })
+
+  it("clears Origin for actual custom OpenAI-compatible chat requests", () => {
+    expect(getProviderConfig(customConfig()).headers).toMatchObject({
+      Authorization: "Bearer sk-test",
+      Origin: "",
+    })
+  })
+
+  it("clears Origin for actual custom Responses API requests", () => {
+    expect(getProviderConfig(customConfig({ apiMode: "responses" })).headers).toMatchObject({
+      Authorization: "Bearer sk-test",
+      Origin: "",
+    })
+  })
+
+  it("clears Origin for actual custom Anthropic-compatible requests", () => {
+    expect(getProviderConfig(customConfig({ apiMode: "anthropic_messages" })).headers).toMatchObject({
+      "x-api-key": "sk-test",
+      Origin: "",
+    })
+  })
 })
