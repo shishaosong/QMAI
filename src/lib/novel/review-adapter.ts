@@ -181,10 +181,16 @@ ${langReminder}`
     )
 
     const jsonMatch = result.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return []
+    if (!jsonMatch) {
+      console.warn("[Novel Review] No JSON array found in result:", result.slice(0, 500))
+      return []
+    }
 
     const parsed = JSON.parse(jsonMatch[0])
-    if (!Array.isArray(parsed)) return []
+    if (!Array.isArray(parsed)) {
+      console.warn("[Novel Review] Parsed result is not an array:", parsed)
+      return []
+    }
 
     return parsed.map((item: Record<string, unknown>) => ({
       severity: validateSeverity(item.severity),
@@ -219,6 +225,7 @@ async function runReviewStage(
   callbacks: NovelReviewCallbacks,
   stageThinking: Map<string, string>,
   signal?: AbortSignal,
+  retryCount = 0,
 ): Promise<string> {
   publishReviewStageThinking(stageThinking, callbacks, stageTitle, "正在分析...")
   const messages: ChatMessage[] = [
@@ -238,16 +245,44 @@ async function runReviewStage(
     },
   }
 
-  await streamChat(
-    llmConfig,
-    messages,
-    streamCallbacks,
-    signal ?? AbortSignal.timeout(120000),
-    { reasoning: { mode: "high" } },
-  )
+  const timeoutController = new AbortController()
+  const timeoutId = setTimeout(() => timeoutController.abort(), 300000)
+
+  const combinedSignal = signal
+    ? combineSignals(signal, timeoutController.signal)
+    : timeoutController.signal
+
+  try {
+    await streamChat(
+      llmConfig,
+      messages,
+      streamCallbacks,
+      combinedSignal,
+      { reasoning: { mode: "high" } },
+    )
+    clearTimeout(timeoutId)
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (signal?.aborted) throw new Error("已停止生成")
+    if (retryCount < 2) {
+      console.warn(`[Novel Review] Stage "${stageTitle}" failed, retrying (${retryCount + 1}/2)...`)
+      publishReviewStageThinking(stageThinking, callbacks, stageTitle, "网络波动，正在重试...")
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      return runReviewStage(llmConfig, systemPrompt, userPrompt, stageTitle, callbacks, stageThinking, signal, retryCount + 1)
+    }
+    throw err
+  }
 
   if (signal?.aborted) throw new Error("已停止生成")
   return result.trim()
+}
+
+function combineSignals(signalA: AbortSignal, signalB: AbortSignal): AbortSignal {
+  const controller = new AbortController()
+  const abort = () => controller.abort()
+  signalA.addEventListener("abort", abort, { once: true })
+  signalB.addEventListener("abort", abort, { once: true })
+  return controller.signal
 }
 
 function publishReviewStageThinking(

@@ -246,9 +246,15 @@ export async function runDeepChapterGeneration(
       "阶段4：AI审稿",
       "正在检查正文完整性、剧情连续性、是否被截断以及是否存在阻断问题。",
     ))
-    reviewResults = signal
-      ? await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, undefined, signal)
-      : await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber)
+    try {
+      reviewResults = signal
+        ? await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, { onThinking: callbacks.onThinking }, signal)
+        : await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, { onThinking: callbacks.onThinking })
+    } catch (err) {
+      console.error("[Deep Chapter] Review failed:", err)
+      reviewResults = []
+    }
+    reviewResults = reviewResults || []
     assertNotAborted(signal)
     callbacks.onThinking?.(formatReviewThinking(reviewResults))
     callbacks.onCheckpoint?.(createResumeCheckpoint(input, "after_review", { taskBrief, draftContent, reviewResults }))

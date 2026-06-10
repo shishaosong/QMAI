@@ -1,7 +1,6 @@
 import { createDirectory, fileExists, listDirectory, readFile, writeFile } from "@/commands/fs"
 import { streamChat } from "@/lib/llm-client"
 import { getOutputLanguage } from "@/lib/output-language"
-import { searchWiki } from "@/lib/search"
 import { getFileName, normalizePath } from "@/lib/path-utils"
 import i18n from "@/i18n"
 import type { ChatMessage } from "@/lib/llm-providers"
@@ -169,8 +168,16 @@ export async function buildOutlineGenerationPrompt(
 export async function hasOutlineForRefinement(projectPath: string): Promise<boolean> {
   try {
     const pp = normalizePath(projectPath)
-    const results = await searchWiki(pp, "outline type:outline")
-    return results.length > 0
+    const tree = await listDirectory(`${pp}/wiki/outlines`)
+    const flattenFiles = (nodes: typeof tree): typeof tree => {
+      const files: typeof tree = []
+      for (const node of nodes) {
+        if (node.is_dir && node.children) files.push(...flattenFiles(node.children))
+        else if (!node.is_dir && node.name.endsWith(".md")) files.push(node)
+      }
+      return files
+    }
+    return flattenFiles(tree).length > 0
   } catch {
     return false
   }

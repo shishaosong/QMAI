@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Brain, PencilLine, Plus, Trash2, MessageSquare } from "lucide-react"
+import { BookOpen, Brain, PencilLine, Plus, Trash2, MessageSquare, FileEdit } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -1342,12 +1342,25 @@ export function ChatPanel() {
                           size="sm"
                           aria-pressed={deepChapterEnabled}
                           className={getDeepChapterToggleButtonClass(deepChapterEnabled)}
-                          onClick={() => setDeepChapterEnabled((enabled) => !enabled)}
-                          title="深度章节生成"
-                          aria-label="深度章节生成"
+                          onClick={() => setDeepChapterEnabled(true)}
+                          title="深度思考"
+                          aria-label="深度思考"
                         >
                           <Brain className="mr-1 h-4 w-4" />
-                          深度章节生成
+                          深度思考
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          aria-pressed={!deepChapterEnabled}
+                          className={!deepChapterEnabled ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground" : ""}
+                          onClick={() => setDeepChapterEnabled(false)}
+                          title="普通模式"
+                          aria-label="普通模式"
+                        >
+                          <PencilLine className="mr-1 h-4 w-4" />
+                          普通模式
                         </Button>
                         <Tooltip>
                           <TooltipTrigger
@@ -1357,13 +1370,13 @@ export function ChatPanel() {
                                 variant="ghost"
                                 size="sm"
                                 aria-pressed={chatEditModeEnabled}
-                                className={chatEditModeEnabled ? "border-primary bg-primary text-primary-foreground hover:bg-primary/90" : ""}
+                                className={chatEditModeEnabled ? "border-amber-500 bg-amber-50 text-amber-900 hover:bg-amber-100" : ""}
                                 onClick={() => setChatEditModeEnabled(!chatEditModeEnabled)}
                               />
                             )}
                           >
-                            <PencilLine className="mr-1 h-4 w-4" />
-                            修改模式
+                            <FileEdit className="mr-1 h-4 w-4" />
+                            编辑章节
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-xs leading-5">
                             开启后，AI会话会读取当前章节或识别到的章节范围进行修改，并在写回前自动备份原内容。

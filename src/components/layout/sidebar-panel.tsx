@@ -5,6 +5,7 @@ import {
   BookText,
   Brain,
   ChevronDown,
+  CircleHelp,
   Clock3,
   FilePlus2,
   FileText,
@@ -58,6 +59,9 @@ import { resolveReviewModel } from "@/lib/novel/review-model"
 import { isTauri } from "@/lib/platform"
 import { makeChapterFileName, makeDefaultChapterTitle, makeSafeFileSlug } from "@/lib/wiki-filename"
 import { useImportProgressStore } from "@/stores/import-progress-store"
+import { openExternalUrl } from "@/lib/open-external-url"
+
+const USAGE_GUIDE_URL = "https://tcnk9ik08e1c.feishu.cn/wiki/FWiSwYQKoifpwBk6mSRcSlB8nrh?from=from_copylink"
 
 const DISMANTLING_NO_PREPROCESSING_NEEDED = "no preprocessing needed"
 
@@ -1323,6 +1327,18 @@ export function SidebarPanel() {
           onRemovePendingPage={handleRemovePendingPage}
           onRequestCreate={beginCreate}
         />
+      </div>
+      <div className="border-t px-3 py-2">
+        <button
+          type="button"
+          onClick={() => {
+            void openExternalUrl(USAGE_GUIDE_URL)
+          }}
+          className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <CircleHelp className="h-4 w-4 shrink-0" />
+          <span>{t("iconSidebar.usageGuide")}</span>
+        </button>
       </div>
       <RawSourcesSection onCancelExtraction={handleCancelImportMemoryExtraction} />
       <Dialog

@@ -95,6 +95,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       conversations: [newConversation, ...state.conversations],
       activeConversationId: id,
+      streamingContent: "",
+      isStreaming: false,
     }))
     return id
   },
@@ -113,7 +115,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
       }
     }),
 
-  setActiveConversation: (id) => set({ activeConversationId: id }),
+  setActiveConversation: (id) => set({ activeConversationId: id, streamingContent: "", isStreaming: false }),
 
   renameConversation: (id, title) =>
     set((state) => ({
