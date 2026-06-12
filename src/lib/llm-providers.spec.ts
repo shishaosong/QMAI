@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { getProviderConfig } from "./llm-providers"
+import { getCustomCompatibleHeaders, getProviderConfig, withCustomOriginHeader } from "./llm-providers"
 import type { LlmConfig, ReasoningMode } from "@/stores/wiki-store"
 
 function customConfig(overrides: Partial<LlmConfig> = {}): LlmConfig {
@@ -57,5 +57,48 @@ describe("llm provider reasoning options", () => {
     }))
 
     expect(body.reasoning).toEqual({ effort: "high" })
+  })
+})
+
+describe("custom provider headers", () => {
+  it("clears Origin for remote custom gateways", () => {
+    expect(getCustomCompatibleHeaders("sk-test", "https://example.test/v1/chat/completions")).toMatchObject({
+      Authorization: "Bearer sk-test",
+      Origin: "",
+    })
+  })
+
+  it("keeps localhost Origin only for local endpoints", () => {
+    expect(getCustomCompatibleHeaders("", "http://localhost:11434/v1/chat/completions")).toMatchObject({
+      Origin: "http://localhost",
+    })
+  })
+
+  it("preserves existing auth headers when clearing Origin", () => {
+    expect(withCustomOriginHeader({ "x-api-key": "sk-test" }, "https://example.test/v1/messages")).toEqual({
+      "x-api-key": "sk-test",
+      Origin: "",
+    })
+  })
+
+  it("clears Origin for actual custom OpenAI-compatible chat requests", () => {
+    expect(getProviderConfig(customConfig()).headers).toMatchObject({
+      Authorization: "Bearer sk-test",
+      Origin: "",
+    })
+  })
+
+  it("clears Origin for actual custom Responses API requests", () => {
+    expect(getProviderConfig(customConfig({ apiMode: "responses" })).headers).toMatchObject({
+      Authorization: "Bearer sk-test",
+      Origin: "",
+    })
+  })
+
+  it("clears Origin for actual custom Anthropic-compatible requests", () => {
+    expect(getProviderConfig(customConfig({ apiMode: "anthropic_messages" })).headers).toMatchObject({
+      "x-api-key": "sk-test",
+      Origin: "",
+    })
   })
 })

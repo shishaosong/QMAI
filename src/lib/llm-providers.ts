@@ -139,10 +139,17 @@ function isLocalOrPrivateHttpEndpoint(endpoint: string): boolean {
 }
 
 export function getCustomCompatibleHeaders(apiKey: string, url: string): Record<string, string> {
-  return {
+  return withCustomOriginHeader({
     "Content-Type": JSON_CONTENT_TYPE,
     ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
-    ...(isLocalOrPrivateHttpEndpoint(url) ? localLlmOriginHeader() : {}),
+  }, url)
+}
+
+export function withCustomOriginHeader(headers: Record<string, string>, url: string): Record<string, string> {
+  // 部分中转站会拒绝任何桌面 WebView Origin；Tauri HTTP 插件在 unsafe-headers 下会把空 Origin 视为显式移除。
+  return {
+    ...headers,
+    ...(isLocalOrPrivateHttpEndpoint(url) ? localLlmOriginHeader() : { Origin: "" }),
   }
 }
 
@@ -803,7 +810,7 @@ export function getProviderConfig(config: LlmConfig): ProviderConfig {
         const url = buildAnthropicUrl(customEndpoint)
         return {
           url,
-          headers: buildAnthropicHeaders(apiKey, url),
+          headers: withCustomOriginHeader(buildAnthropicHeaders(apiKey, url), url),
           buildBody: (messages, overrides) => ({
             ...buildAnthropicBodyWithReasoning(config, messages, overrides),
             model,

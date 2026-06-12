@@ -1,4 +1,4 @@
-import { getProviderConfig } from "@/lib/llm-providers"
+import { getProviderConfig, withCustomOriginHeader } from "@/lib/llm-providers"
 import { detectLocalCliConfig } from "@/lib/local-cli-config"
 import { isDirectRerankEndpoint } from "@/lib/rerank-api"
 import { getHttpFetch } from "@/lib/tauri-fetch"
@@ -126,8 +126,11 @@ function buildModelsUrl(config: LlmConfig): { url: string; headers: Record<strin
     modelsUrl = `${url.replace(/\/+$/, "")}/models`
   }
 
-  const { "Content-Type": _contentType, ...headers } = providerConfig.headers
-  return { url: modelsUrl, headers }
+  const headers = config.provider === "custom"
+    ? withCustomOriginHeader(providerConfig.headers, modelsUrl)
+    : providerConfig.headers
+  const { "Content-Type": _contentType, ...modelListHeaders } = headers
+  return { url: modelsUrl, headers: modelListHeaders }
 }
 
 async function fetchModelList(url: string, headers: Record<string, string>, _currentModel: string): Promise<LlmModelListResult> {
