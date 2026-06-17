@@ -125,7 +125,6 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
   const project = useWikiStore((s) => s.project)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const novelConfig = useWikiStore((s) => s.novelConfig)
-  const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const storedSelectedSoulId = useWikiStore((s) => s.selectedSoulId)
   const setStoredSelectedSoulId = useWikiStore((s) => s.setSelectedSoulId)
   const storedSelectedSoulSection = useWikiStore((s) => s.selectedSoulSection)
@@ -273,7 +272,6 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
       setMode("edit")
       setShowCustomEditor(false)
       updateSelectedId(created.id)
-      bumpDataVersion()
       await refreshProjectState(project.path)
       setMessage("自定义灵魂已按 6 步工作流生成并保存到当前小说项目")
     } catch (error) {
@@ -291,7 +289,6 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
       await refresh()
       updateSelectedId(updated.id)
       setShowCustomEditor(false)
-      bumpDataVersion()
       await refreshProjectState(project.path)
       setMessage("自定义灵魂已更新")
     }, "自定义灵魂更新失败，请检查项目文件权限后重试")
@@ -307,7 +304,6 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
       setMode("create")
       setShowCustomEditor(false)
       await refresh()
-      bumpDataVersion()
       await refreshProjectState(project.path)
       setMessage("自定义灵魂已删除")
     }, "自定义灵魂删除失败，请检查项目文件权限后重试")
@@ -318,7 +314,6 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
     await runAction(async () => {
       await bindCharacterAura(project.path, { characterName: characterName.trim(), auraId: selected.id })
       await refresh()
-      bumpDataVersion()
       await refreshProjectState(project.path)
       setMessage(`已将「${selected.name}」绑定到人物「${characterName.trim()}」`)
     }, "绑定失败，请稍后重试")
@@ -329,7 +324,6 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
     await runAction(async () => {
       await unbindCharacterAura(project.path, targetCharacterName, selected.id)
       await refresh()
-      bumpDataVersion()
       await refreshProjectState(project.path)
       setMessage(`已取消“${targetCharacterName}”与“${selected.name}”的绑定`)
     }, "取消绑定失败，请稍后重试")
