@@ -711,21 +711,23 @@ function separateThinking(text: string): { thinking: string | null; answer: stri
 
 /** Streaming thinking: show every stage so the user can inspect progress. */
 function StreamingThinkingBlock({ content }: { content: string }) {
-  const lines = content.split("\n").filter((l) => l.trim())
+  // 将连续短行合并为段落，避免推理 token 逐 token 换行导致消息框过窄
+  const paragraphs = content
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\n/g, " ").trim())
+    .filter((p) => p.length > 0)
 
   return (
     <div className="rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20 px-2.5 py-2">
       <div className="flex items-center gap-1.5 mb-1.5">
         <span className="text-sm animate-pulse">💭</span>
         <span className="text-xs font-medium text-amber-700 dark:text-amber-400">思考中...</span>
-        <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{lines.length} 行</span>
+        <span className="text-[10px] text-amber-600/50 dark:text-amber-500/40">{paragraphs.length} 段</span>
       </div>
       <div className="max-h-72 overflow-y-auto pr-1 text-xs text-amber-800/70 dark:text-amber-300/60 font-mono leading-relaxed whitespace-pre-wrap break-words">
-        {lines.map((line, i) => (
-          <div
-            key={`${i}-${line}`}
-          >
-            {line}
+        {paragraphs.map((p, i) => (
+          <div key={`p-${i}`} className={i > 0 ? "mt-1.5" : ""}>
+            {p}
           </div>
         ))}
         <span className="animate-pulse text-amber-500">▊</span>
@@ -736,17 +738,25 @@ function StreamingThinkingBlock({ content }: { content: string }) {
 
 /** Completed thinking: keep it fully visible; the outer chat scroll owns scrolling. */
 function ThinkingBlock({ content }: { content: string }) {
-  const lines = content.split("\n").filter((l) => l.trim())
+  // 将连续短行合并为段落，避免推理 token 逐 token 换行导致消息框过窄
+  const paragraphs = content
+    .split(/\n\s*\n/)
+    .map((p) => p.replace(/\n/g, " ").trim())
+    .filter((p) => p.length > 0)
 
   return (
     <div className="mb-2 rounded-md border border-dashed border-amber-500/30 bg-amber-50/50 dark:bg-amber-950/20">
       <div className="flex w-full items-center gap-1.5 px-2.5 py-1.5 text-xs text-amber-700 dark:text-amber-400">
         <span className="text-sm">💭</span>
         <span className="font-medium">思考过程</span>
-        <span className="text-[10px] text-amber-600/60 dark:text-amber-500/60">{lines.length} 行</span>
+        <span className="text-[10px] text-amber-600/60 dark:text-amber-500/60">{paragraphs.length} 段</span>
       </div>
       <div className="max-h-72 overflow-y-auto border-t border-amber-500/20 px-2.5 py-2 pr-1 text-xs text-amber-800/80 dark:text-amber-300/70 whitespace-pre-wrap break-words font-mono leading-relaxed">
-        {content}
+        {paragraphs.map((p, i) => (
+          <div key={`p-${i}`} className={i > 0 ? "mt-1.5" : ""}>
+            {p}
+          </div>
+        ))}
       </div>
     </div>
   )

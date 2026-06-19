@@ -463,6 +463,7 @@ async function collectModelText(
   requestOverrides?: RequestOverrides,
 ): Promise<string> {
   let content = ""
+  let reasoningBuffer = ""
   let streamError: Error | null = null
   let cutoffReason: string | null = null
   const streamController = new AbortController()
@@ -493,6 +494,17 @@ async function collectModelText(
           return
         }
         onUpdate?.(content)
+      },
+      onReasoningToken: (token) => {
+        if (signal?.aborted) {
+          stopStream(USER_ABORT_MESSAGE)
+          return
+        }
+        // 推理 token 只用于进度显示，不计入最终 content
+        reasoningBuffer += token
+        if (!content) {
+          onUpdate?.(reasoningBuffer)
+        }
       },
       onDone: () => {},
       onError: (error) => {

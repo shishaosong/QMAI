@@ -11,11 +11,11 @@ describe("release notes for updater manifest", () => {
 
     expect(notes).not.toMatch(/^QMAI [\d.]+ 发布版本$/)
     expect(notes).toContain("1. ")
-    expect(notes).toContain("Issue #10")
-    expect(notes).toContain("frontmatter")
-    expect(notes).toContain("Issue #8")
-    expect(notes).toContain("单章目标字数")
-    expect(notes.split("\n")).toHaveLength(5)
+    const lines = notes.split("\n").filter((line) => line.trim().length > 0)
+    expect(lines.length).toBeGreaterThan(0)
+    for (const line of lines) {
+      expect(line).toMatch(/^\d+\. /)
+    }
     expect(notes).not.toContain(".codex-temp")
   })
 

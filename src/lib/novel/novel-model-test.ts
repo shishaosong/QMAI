@@ -58,9 +58,12 @@ export async function testNovelModel(
 
   const modelKey = `${taskType}Model` as const
 
+  // writingModel 已移除，writing 任务始终视为回退到 AI 会话模型
+  const usedFallbackModel = taskType === "writing" ? true : !novelConfig[modelKey].trim()
+
   return {
     model,
     content: trimmed,
-    usedFallbackModel: !novelConfig[modelKey].trim(),
+    usedFallbackModel,
   }
 }

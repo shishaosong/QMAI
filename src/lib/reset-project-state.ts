@@ -20,8 +20,7 @@ export function resetProjectStores(): void {
     activeConversationId: null,
     mode: "chat",
     ingestSource: null,
-    isStreaming: false,
-    streamingContent: "",
+    streamingContents: {},
   })
 
   useReviewStore.setState({

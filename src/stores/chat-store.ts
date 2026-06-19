@@ -30,8 +30,8 @@ interface ChatState {
   conversations: Conversation[]
   activeConversationId: string | null
   messages: DisplayMessage[]
-  isStreaming: boolean
-  streamingContent: string
+  /** 按会话 ID 存储流式内容，支持多会话同时生成 */
+  streamingContents: Record<string, string>
   mode: "chat" | "ingest"
   ingestSource: string | null
   maxHistoryMessages: number
@@ -48,10 +48,16 @@ interface ChatState {
   addMessage: (role: DisplayMessage["role"], content: string) => void
   setMessages: (messages: DisplayMessage[]) => void
   setConversations: (conversations: Conversation[]) => void
-  setStreaming: (streaming: boolean) => void
-  setStreamingContent: (content: string) => void
-  appendStreamToken: (token: string) => void
-  finalizeStream: (content: string, references?: MessageReference[]) => void
+  /** 开始指定会话的流式生成 */
+  startStreaming: (conversationId: string) => void
+  /** 追加 token 到指定会话的流式内容 */
+  appendStreamToken: (token: string, conversationId: string) => void
+  /** 设置指定会话的流式内容（用于深度模式整体更新） */
+  setStreamingContent: (content: string, conversationId: string) => void
+  /** 结束指定会话的流式生成，将内容保存为消息 */
+  finalizeStream: (content: string, references?: MessageReference[] | undefined, targetConvId?: string) => void
+  /** 停止指定会话的流式生成（不保存内容，仅清理状态） */
+  clearStreaming: (conversationId: string) => void
   setMode: (mode: ChatState["mode"]) => void
   setIngestSource: (path: string | null) => void
   clearMessages: () => void
@@ -61,6 +67,10 @@ interface ChatState {
 
   // Helpers
   getActiveMessages: () => DisplayMessage[]
+  isConversationStreaming: (conversationId: string) => boolean
+  getStreamingContent: (conversationId: string) => string
+  /** 是否有任何会话正在流式生成 */
+  isAnyStreaming: () => boolean
 }
 
 let messageCounter = 0
@@ -78,8 +88,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   conversations: [],
   activeConversationId: null,
   messages: [],
-  isStreaming: false,
-  streamingContent: "",
+  streamingContents: {},
   mode: "chat",
   ingestSource: null,
   maxHistoryMessages: 20,
@@ -98,8 +107,6 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => ({
       conversations: [newConversation, ...state.conversations],
       activeConversationId: id,
-      streamingContent: "",
-      isStreaming: false,
     }))
     return id
   },
@@ -111,14 +118,17 @@ export const useChatStore = create<ChatState>((set, get) => ({
         state.activeConversationId === id
           ? (remaining[0]?.id ?? null)
           : state.activeConversationId
+      // 清理该会话的流式状态
+      const { [id]: _, ...restStreaming } = state.streamingContents
       return {
         conversations: remaining,
         messages: state.messages.filter((m) => m.conversationId !== id),
         activeConversationId: newActiveId,
+        streamingContents: restStreaming,
       }
     }),
 
-  setActiveConversation: (id) => set({ activeConversationId: id, streamingContent: "", isStreaming: false }),
+  setActiveConversation: (id) => set({ activeConversationId: id }),
 
   renameConversation: (id, title) =>
     set((state) => ({
@@ -181,22 +191,36 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setConversations: (conversations) => set({ conversations }),
 
-  setStreaming: (isStreaming) => set({ isStreaming }),
-
-  setStreamingContent: (streamingContent) => set({ streamingContent }),
-
-  appendStreamToken: (token) =>
+  startStreaming: (conversationId) =>
     set((state) => ({
-      streamingContent: state.streamingContent + token,
+      streamingContents: {
+        ...state.streamingContents,
+        [conversationId]: "",
+      },
     })),
 
-  finalizeStream: (content, references) =>
+  appendStreamToken: (token, conversationId) =>
+    set((state) => ({
+      streamingContents: {
+        ...state.streamingContents,
+        [conversationId]: (state.streamingContents[conversationId] ?? "") + token,
+      },
+    })),
+
+  setStreamingContent: (content, conversationId) =>
+    set((state) => ({
+      streamingContents: {
+        ...state.streamingContents,
+        [conversationId]: content,
+      },
+    })),
+
+  finalizeStream: (content, references, targetConvId?: string) =>
     set((state) => {
-      const { activeConversationId, conversations } = state
-      if (!activeConversationId) {
+      const convId = targetConvId ?? state.activeConversationId
+      if (!convId) {
         return {
-          isStreaming: false,
-          streamingContent: "",
+          streamingContents: {},
         }
       }
 
@@ -205,20 +229,28 @@ export const useChatStore = create<ChatState>((set, get) => ({
         role: "assistant" as const,
         content,
         timestamp: Date.now(),
-        conversationId: activeConversationId,
+        conversationId: convId,
         references,
       }
 
+      // 清理该会话的流式状态
+      const { [convId]: _, ...restStreaming } = state.streamingContents
+
       return {
-        isStreaming: false,
-        streamingContent: "",
+        streamingContents: restStreaming,
         messages: [...state.messages, newMessage],
-        conversations: conversations.map((c) =>
-          c.id === activeConversationId
+        conversations: state.conversations.map((c) =>
+          c.id === convId
             ? { ...c, updatedAt: Date.now() }
             : c
         ),
       }
+    }),
+
+  clearStreaming: (conversationId) =>
+    set((state) => {
+      const { [conversationId]: _, ...restStreaming } = state.streamingContents
+      return { streamingContents: restStreaming }
     }),
 
   setMode: (mode) => set({ mode }),
@@ -267,6 +299,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
     const { messages, activeConversationId } = get()
     if (!activeConversationId) return []
     return messages.filter((m) => m.conversationId === activeConversationId)
+  },
+
+  isConversationStreaming: (conversationId) => {
+    return conversationId in get().streamingContents
+  },
+
+  getStreamingContent: (conversationId) => {
+    return get().streamingContents[conversationId] ?? ""
+  },
+
+  isAnyStreaming: () => {
+    return Object.keys(get().streamingContents).length > 0
   },
 }))
 

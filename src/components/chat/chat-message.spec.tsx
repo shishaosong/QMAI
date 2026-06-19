@@ -91,10 +91,8 @@ describe("deep chapter unfinished continuation action", () => {
   it("keeps the ai chat footer labels as readable Chinese text", () => {
     const source = readFileSync(resolve(__dirname, "chat-panel.tsx"), "utf8")
 
-    expect(source).toContain("深度思考")
-    expect(source).toContain("普通模式")
+    expect(source).toContain("深度模式")
     expect(source).toContain("编辑章节")
-    expect(source).toContain("AI会话模型")
-    expect(source).toContain("跟随当前主模型")
+    expect(source).toContain("继续未完成")
   })
 })

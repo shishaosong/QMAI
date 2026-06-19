@@ -1429,7 +1429,9 @@ export async function startIngest(
   store.setMode("ingest")
   store.setIngestSource(sp)
   store.clearMessages()
-  store.setStreaming(false)
+  // 清理所有流式状态
+  const activeId = store.activeConversationId
+  if (activeId) store.clearStreaming(activeId)
 
   // Extract embedded images upfront — independent of the LLM call
   // that follows. Done eagerly here (rather than in
@@ -1481,7 +1483,8 @@ export async function startIngest(
   ].join("\n")
 
   store.addMessage("user", userMessage)
-  store.setStreaming(true)
+  const convId = store.activeConversationId
+  if (convId) store.startStreaming(convId)
 
   let accumulated = ""
 
@@ -1494,7 +1497,8 @@ export async function startIngest(
     {
       onToken: (token) => {
         accumulated += token
-        getStore().appendStreamToken(token)
+        const cid = getStore().activeConversationId
+        if (cid) getStore().appendStreamToken(token, cid)
       },
       onDone: () => {
         getStore().finalizeStream(accumulated)
@@ -1550,7 +1554,8 @@ export async function executeIngestWrites(
   conversationHistory.push({ role: "user", content: writePrompt })
 
   store.addMessage("user", writePrompt)
-  store.setStreaming(true)
+  const writeConvId = store.activeConversationId
+  if (writeConvId) store.startStreaming(writeConvId)
 
   let accumulated = ""
 
@@ -1577,7 +1582,8 @@ export async function executeIngestWrites(
     {
       onToken: (token) => {
         accumulated += token
-        getStore().appendStreamToken(token)
+        const cid = getStore().activeConversationId
+        if (cid) getStore().appendStreamToken(token, cid)
       },
       onDone: () => {
         getStore().finalizeStream(accumulated)

@@ -53,7 +53,6 @@ export function NovelSection({ draft, setDraft }: Props) {
   }
 
   const modelItems = useMemo(() => ([
-    { task: "writing", field: "writingModel", wrapperClassName: "space-y-2" },
     { task: "review", field: "reviewModel", wrapperClassName: "space-y-2" },
     { task: "summary", field: "summaryModel", wrapperClassName: "space-y-2" },
     {

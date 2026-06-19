@@ -26,7 +26,7 @@ export function resolveNovelModel(
   taskType: NovelTaskType,
 ): LlmConfig {
   const modelMap: Record<NovelTaskType, string> = {
-    writing: novelConfig.writingModel,
+    writing: "", // 写作模型已移除，始终使用 AI 会话当前模型
     review: novelConfig.reviewModel,
     summary: novelConfig.summaryModel,
     extract: novelConfig.extractModel,

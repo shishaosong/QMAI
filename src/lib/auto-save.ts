@@ -19,7 +19,7 @@ export function setupAutoSave(): void {
   })
 
   useChatStore.subscribe((state) => {
-    if (state.isStreaming) return
+    if (Object.keys(state.streamingContents).length > 0) return
     if (chatTimer) clearTimeout(chatTimer)
     chatTimer = setTimeout(() => {
       const project = useWikiStore.getState().project

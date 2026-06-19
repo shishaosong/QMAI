@@ -19,6 +19,16 @@
       "fallback": "Fallback Mode (No Daemon)"
     }
   },
+  "common": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "close": "Close",
+    "confirm": "Confirm",
+    "back": "Back",
+    "next": "Next"
+  },
   "sidebar": {
     "knowledge": "Chapters",
     "files": "Outlines",
@@ -342,7 +352,10 @@
     "retry": "Retry",
     "references": "References",
     "saveToWiki": "Save to wiki",
-    "saveAsDraft": "Save as draft"
+    "saveAsDraft": "Save as draft",
+    "selectModel": "Select model",
+    "searchModel": "Search models...",
+    "noModelFound": "No matching model"
   },
   "search": {
     "title": "Search",
@@ -778,7 +791,30 @@
         "providerTests": "Model tests",
         "providerTestsHint": "Connection test checks reachability. Functional test asks the model to return a specific token, confirming it can generate usable output.",
         "testConnection": "Test connection",
-        "testFunction": "Test function"
+        "testFunction": "Test function",
+        "savedModels": {
+          "title": "Saved models",
+          "addModel": "Add model",
+          "editModel": "Edit model",
+          "delete": "Delete",
+          "edit": "Edit",
+          "empty": "No saved models yet",
+          "endpoint": "Endpoint",
+          "confirmDelete": "Are you sure you want to delete this model configuration?",
+          "dialogDescription": "Configure a new model. You can use a different API key or endpoint address to switch quickly in AI Chat.",
+          "modelName": "Model name",
+          "modelNamePlaceholder": "e.g. GPT-4o",
+          "modelId": "Model ID",
+          "modelIdPlaceholder": "e.g. gpt-4o",
+          "apiKey": "API Key (optional)",
+          "apiKeyPlaceholder": "Leave blank to reuse the provider's key",
+          "apiKeyHint": "Leave blank to reuse the current provider's API key",
+          "customEndpoint": "Custom endpoint (optional)",
+          "customEndpointPlaceholder": "Leave blank to reuse the provider's endpoint",
+          "customEndpointHint": "Leave blank to reuse the current provider's endpoint",
+          "description": "Description",
+          "descriptionPlaceholder": "e.g. good for coding"
+        }
       },
       "embedding": {
         "title": "Vector Search / Embedding Model",
