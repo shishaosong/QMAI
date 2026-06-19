@@ -78,6 +78,25 @@ const TWO_POINT_TWO_ELEVEN_CHANGELOG: ChangelogEntry = {
   },
 }
 
+const TWO_POINT_TWO_EIGHTEEN_CHANGELOG: ChangelogEntry = {
+  version: "2.2.18",
+  date: "2026-06-19",
+  highlights: {
+    en: [
+      "Added global font-size control (Settings > Interface, 85%-130% slider).",
+      "Added seamless auto-refresh after AI generation or file save.",
+      "Added data management: export/import to fully restore all content including AI conversations, outlines, models, and memory before OS reinstall.",
+      "Optimized and fixed various minor issues.",
+    ],
+    zh: [
+      "新增全局界面字号调节（设置 → 界面，支持 85%-130%）",
+      "新增 AI 生成/保存文件后的无感自动刷新",
+      "新增数据管理功能，如果要装系统可以使用导出数据功能，之后再使用导入数据功能，可完美恢复所有内容，包括AI会话，AI大纲，模型,记忆等",
+      "优化修复一些其他小问题",
+    ],
+  },
+}
+
 const TWO_POINT_TWO_SEVENTEEN_CHANGELOG: ChangelogEntry = {
   version: "2.2.17",
   date: "2026-06-18",
@@ -403,6 +422,7 @@ export const CHANGELOG: ChangelogEntry[] = [
 ]
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  if (version === TWO_POINT_TWO_EIGHTEEN_CHANGELOG.version) return [TWO_POINT_TWO_EIGHTEEN_CHANGELOG]
   if (version === TWO_POINT_TWO_SEVENTEEN_CHANGELOG.version) return [TWO_POINT_TWO_SEVENTEEN_CHANGELOG]
   if (version === TWO_POINT_TWO_SIXTEEN_CHANGELOG.version) return [TWO_POINT_TWO_SIXTEEN_CHANGELOG]
   if (version === TWO_POINT_TWO_FOURTEEN_CHANGELOG.version) return [TWO_POINT_TWO_FOURTEEN_CHANGELOG]
@@ -425,6 +445,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    TWO_POINT_TWO_EIGHTEEN_CHANGELOG,
     TWO_POINT_TWO_SEVENTEEN_CHANGELOG,
     TWO_POINT_TWO_SIXTEEN_CHANGELOG,
     TWO_POINT_TWO_FOURTEEN_CHANGELOG,
