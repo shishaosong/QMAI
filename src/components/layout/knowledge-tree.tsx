@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, FolderOpen, Globe, Plus, Trash2 } from "lucide-react"
+import { BookOpen, ChevronDown, ChevronRight, FileText, Folder, FolderInput, FolderOpen, Globe, Pencil, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
-import { deleteFile, fileExists, listDirectory, readFile, writeFile, openFileLocation } from "@/commands/fs"
+import { deleteFile, fileExists, listDirectory, readFile, writeFile, openFileLocation, copyFile } from "@/commands/fs"
 import type { FileNode } from "@/types/wiki"
 import { buildChapterWordCountLabel, getChapterStatusLabel } from "@/lib/chapter-display"
 import { normalizePath } from "@/lib/path-utils"
@@ -278,6 +278,7 @@ export function KnowledgeTree({
   const [renamingPath, setRenamingPath] = useState<string | null>(null)
   const [renameValue, setRenameValue] = useState("")
   const [renamingBusy, setRenamingBusy] = useState(false)
+  const [moveMenuTarget, setMoveMenuTarget] = useState<string | null>(null)
   const [dragSource, setDragSource] = useState<string | null>(null)
   const [dragInsertIndex, setDragInsertIndex] = useState<number | null>(null)
   const [isDragging, setIsDragging] = useState(false)
@@ -392,6 +393,46 @@ export function KnowledgeTree({
     return sectionNode?.children ?? []
   }, [fileTree, sectionRootPath])
 
+  const volumeFolders = useMemo(() => {
+    return sectionNodes.filter((node) => node.is_dir).map((node) => ({
+      name: node.name,
+      path: normalizePath(node.path),
+    }))
+  }, [sectionNodes])
+
+  const handleMoveToVolume = useCallback(async (sourcePath: string, targetVolumePath: string) => {
+    if (!project) return
+    const normalizedSource = normalizePath(sourcePath)
+    const fileName = normalizedSource.split("/").pop()
+    if (!fileName) return
+
+    const destPath = `${targetVolumePath}/${fileName}`
+    if (normalizedSource === destPath) return
+
+    if (await fileExists(destPath)) {
+      window.alert(t("knowledgeTree.moveTargetExists"))
+      return
+    }
+
+    try {
+      await copyFile(normalizedSource, destPath)
+      await deleteFile(normalizedSource)
+
+      await loadPages()
+      const tree = await listDirectory(normalizePath(project.path))
+      setFileTree(tree)
+      bumpDataVersion()
+      if (selectedFile === normalizedSource) {
+        setSelectedFile(destPath)
+      }
+    } catch (error) {
+      console.error("[KnowledgeTree] move to volume failed:", error)
+    } finally {
+      setMoveMenuTarget(null)
+      setPageMenu(null)
+    }
+  }, [project, t, loadPages, setFileTree, bumpDataVersion, selectedFile, setSelectedFile])
+
   const handleDeleteClick = useCallback(async (pagePath: string) => {
     if (!project) return
     if (armedPath !== pagePath) {
@@ -429,17 +470,18 @@ export function KnowledgeTree({
   }, [project, armedPath, filterType, loadPages, onRemovePendingPage, setFileTree, bumpDataVersion, selectedFile, setSelectedFile])
 
   const handleDeleteFolder = useCallback(async (folderPath: string) => {
-    if (!project || filterType !== "outline") return
+    if (!project) return
 
     const normalizedFolderPath = normalizePath(folderPath)
     const folderNode = findNodeByPath(sectionNodes, normalizedFolderPath)
     if (!folderNode?.is_dir) return
 
-    const outlineFiles = flattenMdFiles([folderNode]).map((file) => normalizePath(file.path))
+    const mdFiles = flattenMdFiles([folderNode]).map((file) => normalizePath(file.path))
     const folderName = folderNode.name
+    const fileKind = filterType === "chapter" ? "chapter" : "outline"
     const confirmed = window.confirm(
-      outlineFiles.length > 0
-        ? t("knowledgeTree.deleteFolderConfirm", { name: folderName, count: outlineFiles.length })
+      mdFiles.length > 0
+        ? t("knowledgeTree.deleteFolderConfirm", { name: folderName, count: mdFiles.length })
         : t("knowledgeTree.deleteEmptyFolderConfirm", { name: folderName }),
     )
     if (!confirmed) return
@@ -448,13 +490,13 @@ export function KnowledgeTree({
     setDeletingPath(normalizedFolderPath)
     try {
       const projectPath = normalizePath(project.path)
-      for (const outlinePath of outlineFiles) {
-        await moveFileToTrash(projectPath, outlinePath, "outline")
+      for (const filePath of mdFiles) {
+        await moveFileToTrash(projectPath, filePath, fileKind)
         await cleanupDeletedSourceMemory(projectPath, {
-          kind: "outline",
-          pagePath: outlinePath,
+          kind: fileKind,
+          pagePath: filePath,
         })
-        onRemovePendingPage?.(outlinePath)
+        onRemovePendingPage?.(filePath)
       }
 
       const remainingNodes = await listDirectory(normalizedFolderPath).catch(() => [])
@@ -1058,7 +1100,7 @@ export function KnowledgeTree({
               <Folder className="h-3.5 w-3.5" />
               {filterType === "chapter" ? t("sidebar.newVolume") : t("sidebar.newFolder")}
             </button>
-            {filterType === "outline" && createMenu.targetFolderPath ? (
+            {createMenu.targetFolderPath ? (
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-3 py-2 text-left text-destructive hover:bg-accent"
@@ -1071,7 +1113,7 @@ export function KnowledgeTree({
                 }}
               >
                 <Trash2 className="h-3.5 w-3.5" />
-                {t("knowledgeTree.deleteFolder")}
+                {filterType === "chapter" ? t("knowledgeTree.deleteVolume") : t("knowledgeTree.deleteFolder")}
               </button>
             ) : null}
           </div>
@@ -1119,8 +1161,47 @@ export function KnowledgeTree({
                 if (target) startRenamePage(target)
               }}
             >
+              <Pencil className="h-3.5 w-3.5" />
               {t("knowledgeTree.rename")}
             </button>
+            {filterType === "chapter" && volumeFolders.length > 0 && (
+              <div>
+                <button
+                  type="button"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent"
+                  onClick={() => setMoveMenuTarget(moveMenuTarget === pageMenu.path ? null : pageMenu.path)}
+                >
+                  <FolderInput className="h-3.5 w-3.5" />
+                  {t("knowledgeTree.moveToVolume")}
+                  <ChevronRight className="ml-auto h-3 w-3" />
+                </button>
+                {moveMenuTarget === pageMenu.path && (
+                  <div className="max-h-48 overflow-y-auto border-t bg-background py-1 text-xs">
+                    {volumeFolders.map((vol) => {
+                      const sourceDir = getDirName(pageMenu.path)
+                      const isCurrentVolume = sourceDir === vol.path
+                      return (
+                        <button
+                          key={vol.path}
+                          type="button"
+                          className={`flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent ${isCurrentVolume ? "opacity-50 cursor-not-allowed" : ""}`}
+                          disabled={isCurrentVolume}
+                          onClick={() => {
+                            if (!isCurrentVolume) {
+                              void handleMoveToVolume(pageMenu.path, vol.path)
+                            }
+                          }}
+                        >
+                          <Folder className="h-3 w-3 shrink-0 text-amber-500" />
+                          <span className="truncate">{vol.name}</span>
+                          {isCurrentVolume && <span className="ml-auto text-[10px] text-muted-foreground">当前</span>}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
             <button
               type="button"
               className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-accent"
