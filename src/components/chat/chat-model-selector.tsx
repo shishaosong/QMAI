@@ -25,25 +25,29 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [dropdownStyle, setDropdownStyle] = useState<{ left: number; top: number; width: number } | null>(null)
-  const activePresetId = useWikiStore((s) => s.activePresetId)
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
 
-  // 按预设/卡片分组：内置预设（activePresetId）置顶，然后所有 custom-* 卡片
+  // 按预设/卡片分组：所有启用的内置预设 + 所有启用的自定义卡片
   const modelGroups = useMemo<ModelGroup[]>(() => {
     const groups: ModelGroup[] = []
 
-    if (activePresetId && !activePresetId.startsWith("custom-")) {
-      const config = providerConfigs[activePresetId]
-      if (config?.savedModels && config.savedModels.length > 0) {
-        const preset = LLM_PRESETS.find((p) => p.id === activePresetId)
+    // 遍历所有内置预设（非 custom- 开头），过滤已停用的
+    const builtinKeys = Object.keys(providerConfigs).filter((k) => !k.startsWith("custom-"))
+    for (const key of builtinKeys) {
+      const config = providerConfigs[key]
+      // 过滤掉未启用（enabled !== true）的预设
+      if (config.enabled !== true) continue
+      if (config.savedModels && config.savedModels.length > 0) {
+        const preset = LLM_PRESETS.find((p) => p.id === key)
         groups.push({
-          id: activePresetId,
-          label: preset?.label || activePresetId,
+          id: key,
+          label: preset?.label || config.label || key,
           models: config.savedModels,
         })
       }
     }
 
+    // 自定义卡片
     const customKeys = Object.keys(providerConfigs).filter((k) => k.startsWith("custom-"))
     for (const key of customKeys) {
       const config = providerConfigs[key]
@@ -59,7 +63,7 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
     }
 
     return groups
-  }, [activePresetId, providerConfigs])
+  }, [providerConfigs])
 
   const selectedModel = useMemo(() => {
     if (!value) return null

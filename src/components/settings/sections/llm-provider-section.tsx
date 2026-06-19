@@ -72,7 +72,7 @@ export function LlmProviderSection() {
 
   function toggleEnabled(id: string) {
     const current = providerConfigs[id]
-    const currentEnabled = current?.enabled ?? true
+    const currentEnabled = current?.enabled === true
     const merged: ProviderOverride = { ...(current ?? {}), enabled: !currentEnabled }
     const next = { ...providerConfigs, [id]: merged }
     setProviderConfigs(next)
@@ -101,7 +101,7 @@ export function LlmProviderSection() {
               preset={preset}
               override={ov}
               isActive={activePresetId === preset.id}
-              isEnabled={ov?.enabled !== false}
+              isEnabled={ov?.enabled === true}
               isExpanded={!!expanded[preset.id]}
               savedHere={savedId === preset.id}
               onToggleActive={() => toggleActive(preset.id)}
