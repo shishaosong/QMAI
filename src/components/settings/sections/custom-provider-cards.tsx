@@ -245,18 +245,8 @@ function CustomProviderCardItem({
       const result = await fetchLlmModelList(resolvedConfig)
       setModelOptions(result.models)
 
-      // 自动将所有模型设置为可用（如果之前没有选择）
-      if (card.savedModels.length === 0) {
-        const autoSavedModels: SavedModel[] = result.models.map((modelId, index) => ({
-          id: `model-${Date.now()}-${index}`,
-          name: modelId,
-          model: modelId,
-          apiKey: card.apiKey,
-          customEndpoint: card.baseUrl,
-          createdAt: Date.now(),
-        }))
-        onUpdate({ savedModels: autoSavedModels })
-      }
+      // 拉取新模型后清空旧的已选模型（URL/API 可能已更换，旧模型不再有效）
+      onUpdate({ savedModels: [] })
 
       // 拉取成功后自动展开模型选择区域
       setIsExpanded(true)
@@ -509,8 +499,43 @@ function CustomProviderCardItem({
 
               {isExpanded && (
                 <>
-                  <div className="text-xs text-muted-foreground">
-                    点击模型标签选择/取消，未选择时默认全部可用
+                  <div className="flex items-center justify-between">
+                    <div className="text-xs text-muted-foreground">
+                      点击模型标签选择/取消，未选择时默认全部可用
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const allSelected = modelOptions.every((modelId) =>
+                            card.savedModels.some((m) => m.model === modelId)
+                          )
+                          if (allSelected) return
+                          const newModels: SavedModel[] = modelOptions.map((modelId) => ({
+                            id: `model-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+                            name: modelId,
+                            model: modelId,
+                            apiKey: card.apiKey,
+                            customEndpoint: card.baseUrl,
+                            createdAt: Date.now(),
+                          }))
+                          onUpdate({ savedModels: newModels })
+                        }}
+                        className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
+                      >
+                        全选
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (card.savedModels.length === 0) return
+                          onUpdate({ savedModels: [] })
+                        }}
+                        className="rounded-md border px-2 py-0.5 text-xs hover:bg-accent"
+                      >
+                        清空
+                      </button>
+                    </div>
                   </div>
 
                   <div className="flex flex-wrap gap-2">
