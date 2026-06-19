@@ -51,4 +51,21 @@ describe("DataSourceRegistry", () => {
     expect(loaded.fallbackRecentSummaries).toEqual([])
     expect(loaded.outline).toBe("")
   })
+
+  it("replaces undefined revision feedback with an empty feedback object", async () => {
+    const registry = new DataSourceRegistry()
+    registry.register({
+      name: "revisionFeedback",
+      priority: 1,
+      load: async () => undefined,
+    })
+
+    const loaded = await registry.loadAll(context)
+
+    expect(loaded.revisionFeedback).toEqual({
+      mustFix: [],
+      shouldImprove: [],
+      carryToNextChapter: [],
+    })
+  })
 })

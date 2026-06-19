@@ -181,10 +181,10 @@ function SnapshotList({
     <div>
       <div className="text-xs font-medium text-muted-foreground">{title}</div>
       <ul className="mt-1 space-y-1 text-xs text-foreground">
-        {items.map((item) => (
-          <li key={`${title}-${item}`}>{item}</li>
+        {items.map((item, index) => (
+          <li key={`${title}-${index}-${item}`}>{item}</li>
         ))}
-        {hasMore ? <li className="text-muted-foreground">…</li> : null}
+        {hasMore ? <li key={`${title}-more`} className="text-muted-foreground">…</li> : null}
       </ul>
     </div>
   )
@@ -523,7 +523,7 @@ function MemoryCenterDetailPanel({
       <div className="space-y-3">
         {detailView.cards.map((card) => (
           <SnapshotCard
-            key={card.chapterNumber}
+            key={card.snapshotPath || `${card.chapterNumber}-${card.chapterTitle}`}
             card={card}
             buttonId={`memory-center-detail-snapshot-${card.chapterNumber}`}
             onOpen={onOpenSnapshot}

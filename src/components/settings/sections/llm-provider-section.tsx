@@ -17,6 +17,7 @@ import { testSettingsLlmModel } from "@/lib/settings-model-test"
 import { ModelSelectInput } from "../model-select-input"
 import { SavedModelsManager } from "./saved-models-manager"
 import { CustomProviderCards } from "./custom-provider-cards"
+import { getLlmPresetById } from "../llm-preset-utils"
 
 export function LlmProviderSection() {
   const { t } = useTranslation()
@@ -41,7 +42,7 @@ export function LlmProviderSection() {
     await saveProviderConfigs(newConfigs)
     await saveActivePresetId(newActive)
     if (newActive) {
-      const preset = LLM_PRESETS.find((p) => p.id === newActive)
+      const preset = getLlmPresetById(newActive, newConfigs)
       if (preset) {
         const resolved = resolveConfig(preset, newConfigs[newActive], llmConfig)
         setLlmConfig(resolved)
@@ -57,7 +58,7 @@ export function LlmProviderSection() {
     persist(next, activePresetId).catch(() => {})
     // If this preset is active, refresh the resolved LlmConfig live.
     if (id === activePresetId) {
-      const preset = LLM_PRESETS.find((p) => p.id === id)
+      const preset = getLlmPresetById(id, next)
       if (preset) setLlmConfig(resolveConfig(preset, merged, llmConfig))
     }
     setSavedId(id)
@@ -169,7 +170,7 @@ function PresetRow({
   const [modelTestState, setModelTestState] = useState<ModelActionState>(null)
   const [isModelSelectionExpanded, setIsModelSelectionExpanded] = useState(false)
   const savedModelsTextareaRef = useRef<HTMLTextAreaElement>(null)
-  const hasConfig = !!apiKey || !!ov.baseUrl || !!ov.model || !!ov.azureApiVersion || !!ov.azureModelFamily
+  const hasConfig = !!apiKey || !!ov.baseUrl || !!ov.model || !!ov.name || !!ov.azureApiVersion || !!ov.azureModelFamily
   // Local CLI providers authenticate via their own existing login state
   // (inherited by the spawned subprocess), so no API key field is shown.
   // Ollama ditto for its local-only model.

@@ -5,6 +5,7 @@
 //! spawn this fixed command; it cannot execute arbitrary shell commands.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -20,7 +21,8 @@ use tokio::sync::Mutex;
 
 use super::cli_resolver::{child_path_env, find_cli_command};
 use super::local_cli_config::{
-    apply_local_cli_environment, read_codex_local_config, resolve_home_dir, LocalCliConfigInfo,
+    apply_local_cli_environment, read_codex_local_config, resolve_cli_project_dir,
+    resolve_home_dir, LocalCliConfigInfo,
 };
 
 #[derive(Default)]
@@ -35,6 +37,11 @@ pub struct DetectResult {
     path: Option<String>,
     model: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ModelListResult {
+    models: Vec<String>,
 }
 
 const DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 10;
@@ -58,7 +65,7 @@ fn append_capped_line(collected: &mut String, line: &str, limit_bytes: usize) {
     }
 }
 
-async fn find_codex_command() -> Result<std::path::PathBuf, String> {
+async fn find_codex_command() -> Result<PathBuf, String> {
     find_cli_command("codex", &["codex.cmd", "codex.exe"]).await
 }
 
@@ -153,6 +160,39 @@ pub async fn codex_cli_detect() -> Result<DetectResult, String> {
 }
 
 #[tauri::command]
+pub async fn codex_cli_list_models() -> Result<ModelListResult, String> {
+    let codex = find_codex_command().await?;
+    let mut cmd = Command::new(&codex);
+    suppress_windows_console(&mut cmd);
+    apply_local_cli_environment(&mut cmd);
+    if let Some(path_env) = child_path_env().await {
+        cmd.env("PATH", path_env);
+    }
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(20),
+        cmd.args(["debug", "models"]).output(),
+    )
+    .await
+    .map_err(|_| "`codex debug models` timed out after 20 seconds".to_string())?
+    .map_err(|error| format!("Failed to run `codex debug models`: {error}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("`codex debug models` exited with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(ModelListResult {
+        models: parse_codex_debug_models(&stdout)?,
+    })
+}
+
+#[tauri::command]
 pub async fn codex_cli_spawn(
     app: AppHandle,
     state: State<'_, CodexCliState>,
@@ -160,6 +200,7 @@ pub async fn codex_cli_spawn(
     model: String,
     prompt: String,
     isolate_local_config: bool,
+    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 ) -> Result<(), String> {
     if prompt.trim().is_empty() {
@@ -167,6 +208,7 @@ pub async fn codex_cli_spawn(
     }
 
     let codex = find_codex_command().await?;
+    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
     let mut cmd = Command::new(&codex);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
@@ -176,7 +218,14 @@ pub async fn codex_cli_spawn(
     if isolate_local_config {
         isolate_llm_api_key_env(&mut cmd);
     }
-    cmd.args(build_codex_cli_args(&model, isolate_local_config));
+    if let Some(dir) = &project_dir {
+        cmd.current_dir(dir);
+    }
+    cmd.args(build_codex_cli_args(
+        &model,
+        isolate_local_config,
+        project_dir.as_deref(),
+    ));
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -278,7 +327,9 @@ pub async fn codex_cli_spawn(
             if !stderr_text.is_empty() {
                 stderr_text.push('\n');
             }
-            stderr_text.push_str(&format!("Codex CLI timed out after {timeout_minutes} minutes."));
+            stderr_text.push_str(&format!(
+                "Codex CLI timed out after {timeout_minutes} minutes."
+            ));
         } else if stderr_text.len() >= STDERR_LIMIT_BYTES {
             stderr_text.push_str("\n[stderr truncated]");
         }
@@ -306,12 +357,42 @@ pub async fn codex_cli_spawn(
 }
 
 fn codex_spawn_timeout_minutes(value: Option<u64>) -> u64 {
-    value
-        .unwrap_or(DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES)
-        .clamp(MIN_CODEX_SPAWN_TIMEOUT_MINUTES, MAX_CODEX_SPAWN_TIMEOUT_MINUTES)
+    value.unwrap_or(DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES).clamp(
+        MIN_CODEX_SPAWN_TIMEOUT_MINUTES,
+        MAX_CODEX_SPAWN_TIMEOUT_MINUTES,
+    )
 }
 
-fn build_codex_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
+fn parse_codex_debug_models(stdout: &str) -> Result<Vec<String>, String> {
+    let value: serde_json::Value = serde_json::from_str(stdout)
+        .map_err(|error| format!("Failed to parse `codex debug models` JSON: {error}"))?;
+    let Some(models) = value.get("models").and_then(serde_json::Value::as_array) else {
+        return Ok(Vec::new());
+    };
+
+    let mut parsed = Vec::new();
+    for model in models {
+        let slug = model
+            .get("slug")
+            .or_else(|| model.get("id"))
+            .or_else(|| model.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(slug) = slug {
+            parsed.push(slug.to_string());
+        }
+    }
+    parsed.sort();
+    parsed.dedup();
+    Ok(parsed)
+}
+
+fn build_codex_cli_args(
+    model: &str,
+    isolate_local_config: bool,
+    project_dir: Option<&Path>,
+) -> Vec<String> {
     let mut args = vec!["-a".to_string(), "never".to_string(), "exec".to_string()];
 
     if isolate_local_config {
@@ -319,6 +400,10 @@ fn build_codex_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> 
             "--ignore-user-config".to_string(),
             "--ignore-rules".to_string(),
         ]);
+    }
+
+    if let Some(dir) = project_dir {
+        args.extend(["--cd".to_string(), dir.to_string_lossy().to_string()]);
     }
 
     args.extend([
@@ -387,7 +472,10 @@ mod tests {
             codex_spawn_timeout_minutes(None),
             DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES
         );
-        assert_eq!(codex_spawn_timeout_minutes(Some(0)), MIN_CODEX_SPAWN_TIMEOUT_MINUTES);
+        assert_eq!(
+            codex_spawn_timeout_minutes(Some(0)),
+            MIN_CODEX_SPAWN_TIMEOUT_MINUTES
+        );
         assert_eq!(codex_spawn_timeout_minutes(Some(42)), 42);
         assert_eq!(
             codex_spawn_timeout_minutes(Some(999)),
@@ -397,7 +485,7 @@ mod tests {
 
     #[test]
     fn codex_args_do_not_isolate_local_config_by_default() {
-        let args = build_codex_cli_args("gpt-5", false);
+        let args = build_codex_cli_args("gpt-5", false, None);
 
         assert!(args
             .windows(3)
@@ -410,7 +498,7 @@ mod tests {
 
     #[test]
     fn codex_args_can_isolate_user_config_and_rules() {
-        let args = build_codex_cli_args("gpt-5", true);
+        let args = build_codex_cli_args("gpt-5", true, None);
         let exec_pos = args.iter().position(|arg| arg == "exec").expect("exec arg");
         let ignore_config_pos = args
             .iter()
@@ -427,7 +515,7 @@ mod tests {
 
     #[test]
     fn codex_args_do_not_isolate_user_api_key_by_default() {
-        let args = build_codex_cli_args("gpt-5", false);
+        let args = build_codex_cli_args("gpt-5", false, None);
 
         assert!(!args.contains(&"--ignore-user-config".to_string()));
         assert!(!args.contains(&"--ignore-rules".to_string()));
@@ -435,8 +523,28 @@ mod tests {
 
     #[test]
     fn codex_args_skip_model_flag_when_model_is_empty() {
-        let args = build_codex_cli_args("", false);
+        let args = build_codex_cli_args("", false, None);
         assert!(!args.contains(&"--model".to_string()));
         assert_eq!(args.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn codex_debug_models_parser_reads_slugs() {
+        let parsed = parse_codex_debug_models(
+            r#"{"models":[{"slug":"gpt-5.5","display_name":"GPT-5.5"},{"slug":"gpt-5.4-mini"},{"name":"fallback"}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(parsed, vec!["fallback", "gpt-5.4-mini", "gpt-5.5"]);
+    }
+
+    #[test]
+    fn codex_args_use_current_project_directory() {
+        let dir = Path::new("novel-project");
+        let args = build_codex_cli_args("gpt-5", false, Some(dir));
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "--cd" && pair[1] == "novel-project"));
     }
 }

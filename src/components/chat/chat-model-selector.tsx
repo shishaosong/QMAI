@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { useWikiStore, type SavedModel } from "@/stores/wiki-store"
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
+import { isCustomProviderConfigId } from "@/components/settings/llm-preset-utils"
 
 interface ChatModelSelectorProps {
   value: string
@@ -31,8 +32,8 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
   const modelGroups = useMemo<ModelGroup[]>(() => {
     const groups: ModelGroup[] = []
 
-    // 遍历所有内置预设（非 custom- 开头），过滤已停用的
-    const builtinKeys = Object.keys(providerConfigs).filter((k) => !k.startsWith("custom-"))
+    // 遍历所有内置预设，过滤已停用的
+    const builtinKeys = Object.keys(providerConfigs).filter((k) => !isCustomProviderConfigId(k))
     for (const key of builtinKeys) {
       const config = providerConfigs[key]
       // 过滤掉未启用（enabled !== true）的预设
@@ -48,7 +49,7 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
     }
 
     // 自定义卡片
-    const customKeys = Object.keys(providerConfigs).filter((k) => k.startsWith("custom-"))
+    const customKeys = Object.keys(providerConfigs).filter(isCustomProviderConfigId)
     for (const key of customKeys) {
       const config = providerConfigs[key]
       // 过滤掉已停用（enabled === false）的卡片
@@ -56,7 +57,7 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
       if (config.savedModels && config.savedModels.length > 0) {
         groups.push({
           id: key,
-          label: config.label || "自定义模型",
+          label: config.label || config.name || "自定义模型",
           models: config.savedModels,
         })
       }

@@ -91,30 +91,12 @@ function extractChapterNumberFromMarkdown(markdown: string): number | null {
   return parseChapterMeta(frontmatter as Record<string, unknown>)?.chapterNumber ?? null
 }
 
-function formatWritingBodyWithIndent(markdown: string): string {
+function formatWritingBody(markdown: string): string {
   return formatChapterWriting(markdown)
-  /*
-  const lines = body.split("\n")
-  let inFence = false
-  const formatted = lines.map((line) => {
-    const trimmed = line.trim()
-    if (trimmed.startsWith("```")) {
-      inFence = !inFence
-      return line
-    }
-    if (inFence) return line
-    if (!trimmed) return line
-    if (/^(#{1,6}\s|>\s|[-*+]\s|\d+\.\s|\|)/.test(trimmed)) return line
-    if (/^\s*[-]{3,}\s*$/.test(trimmed)) return line
-    if (/^\s*[　 ]{2}/.test(line)) return line
-    return `　　${line}`
-  })
-  return rawBlock + formatted.join("\n")
-  */
 }
 
 function normalizeChapterWriting(markdown: string): string {
-  return formatWritingBodyWithIndent(syncChapterFrontmatterTitle(markdown))
+  return formatWritingBody(syncChapterFrontmatterTitle(markdown))
 }
 
 function updateChapterHeading(markdown: string, nextTitle: string): string {
@@ -1197,7 +1179,7 @@ export function PreviewPanel() {
               type="button"
               onClick={() => void handleFormatWriting()}
               className="shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
-              title={t("preview.formatWritingTitle", { defaultValue: "自动整理正文段落格式，并为段落添加首行缩进" })}
+              title={t("preview.formatWritingTitle", { defaultValue: "自动整理正文段落格式，并去除首行缩进" })}
             >
               {t("preview.formatWriting", { defaultValue: "一键排版" })}
             </button>

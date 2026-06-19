@@ -29,6 +29,15 @@ describe("llm provider reasoning options", () => {
     expect(body.reasoning_effort).toBe("high")
   })
 
+  it("does not send OpenAI reasoning_effort to Claude models on custom OpenAI-compatible relays", () => {
+    const body = requestBody(customConfig({
+      model: "claude-opus-4-6",
+      reasoning: { mode: "high" },
+    }))
+
+    expect(body).not.toHaveProperty("reasoning_effort")
+  })
+
   it("enables Qwen3 thinking when explicit reasoning is enabled", () => {
     const body = requestBody(customConfig({
       model: "qwen3-235b-a22b",

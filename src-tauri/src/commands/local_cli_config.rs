@@ -65,7 +65,9 @@ pub fn current_local_cli_environment() -> LocalCliEnvironmentInfo {
         user_profile: std::env::var("USERPROFILE")
             .ok()
             .filter(|v| !v.trim().is_empty()),
-        app_data: std::env::var("APPDATA").ok().filter(|v| !v.trim().is_empty()),
+        app_data: std::env::var("APPDATA")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
         http_proxy: read_env_any(["HTTP_PROXY", "http_proxy"]),
         https_proxy: read_env_any(["HTTPS_PROXY", "https_proxy"]),
         all_proxy: read_env_any(["ALL_PROXY", "all_proxy"]),
@@ -88,6 +90,28 @@ pub fn resolve_home_dir() -> Option<PathBuf> {
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
         })
+}
+
+pub fn resolve_cli_project_dir(project_path: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let Some(raw_path) = project_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let path = PathBuf::from(raw_path);
+    if !path.exists() {
+        return Err(format!("Project path does not exist: '{}'", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "Project path is not a directory: '{}'",
+            path.display()
+        ));
+    }
+
+    Ok(Some(path.canonicalize().unwrap_or(path)))
 }
 
 pub fn read_claude_local_config(home_dir: Option<&Path>) -> LocalCliConfigInfo {
@@ -195,7 +219,9 @@ mod tests {
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        ENV_MUTEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn set_env(key: &str, value: Option<&str>) {

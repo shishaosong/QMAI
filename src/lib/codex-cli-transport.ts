@@ -8,9 +8,38 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import type { LlmConfig } from "@/stores/wiki-store"
+import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
+import { normalizePath } from "@/lib/path-utils"
 import type { ChatMessage, ContentBlock, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
+
+function textFromCodexContent(value: unknown): string | null {
+  if (typeof value === "string") return value.length > 0 ? value : null
+  if (!value) return null
+
+  if (Array.isArray(value)) {
+    const text = value
+      .map((part) => textFromCodexContent(part))
+      .filter((part): part is string => typeof part === "string" && part.length > 0)
+      .join("")
+    return text.length > 0 ? text : null
+  }
+
+  if (typeof value !== "object") return null
+  const obj = value as Record<string, unknown>
+
+  for (const key of ["text", "output_text", "message", "result"] as const) {
+    const text = textFromCodexContent(obj[key])
+    if (text) return text
+  }
+
+  for (const key of ["content", "output", "response", "last_message"] as const) {
+    const text = textFromCodexContent(obj[key])
+    if (text) return text
+  }
+
+  return null
+}
 
 export function parseCodexCliLine(rawLine: string): string | null {
   const line = rawLine.trim()
@@ -25,11 +54,34 @@ export function parseCodexCliLine(rawLine: string): string | null {
 
   if (!evt || typeof evt !== "object") return null
   const obj = evt as Record<string, unknown>
-  if (obj.type !== "item.completed") return null
+  const type = typeof obj.type === "string" ? obj.type : ""
 
-  const item = obj.item as Record<string, unknown> | undefined
-  if (item?.type !== "agent_message") return null
-  return typeof item.text === "string" && item.text.length > 0 ? item.text : null
+  if (type === "item.completed") {
+    const item = obj.item as Record<string, unknown> | undefined
+    const itemType = typeof item?.type === "string" ? item.type : ""
+    const role = typeof item?.role === "string" ? item.role : ""
+    const isAssistantMessage =
+      itemType === "agent_message" ||
+      itemType === "assistant_message" ||
+      role === "assistant" ||
+      (itemType === "message" && !role)
+    if (!item || !isAssistantMessage) {
+      return null
+    }
+    return textFromCodexContent(item)
+  }
+
+  if (/^(agent_message|assistant_message|message)(\.completed)?$/.test(type)) {
+    const role = typeof obj.role === "string" ? obj.role : ""
+    if (role && role !== "assistant") return null
+    return textFromCodexContent(obj)
+  }
+
+  if (type === "turn.completed" || type === "response.completed") {
+    return textFromCodexContent(obj)
+  }
+
+  return null
 }
 
 export function extractCodexCliError(rawOutput: string): string {
@@ -89,7 +141,13 @@ type SpawnPayload = Record<string, unknown> & {
   model: string
   prompt: string
   isolateLocalConfig: boolean
+  projectPath?: string
   timeoutMinutes?: number
+}
+
+function currentProjectPath(): string | undefined {
+  const path = useWikiStore.getState().project?.path?.trim()
+  return path ? normalizePath(path) : undefined
 }
 
 export async function streamCodexCli(
@@ -144,25 +202,50 @@ export async function streamCodexCli(
     resolveCompletion()
   }
 
+  let emittedText = ""
+  const emitCodexText = (text: string) => {
+    let nextText = text
+    if (emittedText && text === emittedText) return
+    if (emittedText && text.startsWith(emittedText)) {
+      nextText = text.slice(emittedText.length)
+    }
+    if (!nextText) return
+    emittedText += nextText
+    emittedAgentMessage = true
+    onToken(nextText)
+  }
+
   const replayAgentMessagesFromStdout = (stdout: string | undefined) => {
     if (!stdout) return
 
     for (const line of stdout.split(/\r?\n/)) {
       const token = parseCodexCliLine(line)
       if (token !== null) {
-        emittedAgentMessage = true
-        onToken(token)
+        emitCodexText(token)
       }
     }
+  }
+
+  const signalTimedOut = () => {
+    const reason = signal?.reason as { name?: unknown; message?: unknown } | undefined
+    return reason?.name === "TimeoutError" || /timeout/i.test(String(reason?.message ?? ""))
   }
 
   const abortListener = () => {
     aborted = true
     void invoke("codex_cli_kill", { streamId }).catch(() => {})
-    finishWith(onDone)
+    if (signalTimedOut()) {
+      finishWith(() => onError(new Error("Codex CLI request timed out before returning content. Try again, or increase the Codex CLI timeout in Settings.")))
+    } else {
+      finishWith(onDone)
+    }
   }
   if (aborted) {
-    finishWith(onDone)
+    if (signalTimedOut()) {
+      finishWith(() => onError(new Error("Codex CLI request timed out before returning content. Try again, or increase the Codex CLI timeout in Settings.")))
+    } else {
+      finishWith(onDone)
+    }
     return
   }
   signal?.addEventListener("abort", abortListener)
@@ -171,8 +254,7 @@ export async function streamCodexCli(
     unlistenData = await listen<string>(`codex-cli:${streamId}`, (event) => {
       const token = parseCodexCliLine(event.payload)
       if (token !== null) {
-        emittedAgentMessage = true
-        onToken(token)
+        emitCodexText(token)
       } else {
         captureUnparsed(event.payload)
       }
@@ -204,8 +286,8 @@ export async function streamCodexCli(
             finishWith(() =>
               onError(new Error(
                 details
-                  ? `Codex CLI completed but did not emit an agent_message. Raw output:\n${details}`
-                  : "Codex CLI completed but did not emit an agent_message. Run `codex exec --json` in a terminal to inspect the provider output.",
+                  ? `Codex CLI completed but did not emit assistant content. Raw output:\n${details}`
+                  : "Codex CLI completed but did not emit assistant content. Run `codex exec --json` in a terminal to inspect the provider output.",
               )),
             )
           } else {
@@ -224,13 +306,18 @@ export async function streamCodexCli(
       model: config.model,
       prompt: buildPrompt(messages),
       isolateLocalConfig: config.localCliIsolation === true,
+      projectPath: currentProjectPath(),
       timeoutMinutes: config.codexCliTimeoutMinutes,
     }
     await invoke("codex_cli_spawn", payload)
     if (aborted || signal?.aborted) {
       aborted = true
       await invoke("codex_cli_kill", { streamId }).catch(() => {})
-      finishWith(onDone)
+      if (signalTimedOut()) {
+        finishWith(() => onError(new Error("Codex CLI request timed out before returning content. Try again, or increase the Codex CLI timeout in Settings.")))
+      } else {
+        finishWith(onDone)
+      }
       return
     }
     await completion

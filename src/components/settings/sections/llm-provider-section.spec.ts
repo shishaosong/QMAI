@@ -22,4 +22,10 @@ describe("LLM provider model controls", () => {
     expect(source).toContain('t("settings.sections.shared.testModel")')
     expect(source).toContain('t("settings.sections.shared.testSuccessWithModel", { model: result.model })')
   })
+
+  it("uses the custom provider card manager instead of duplicating custom preset rows", () => {
+    expect(source).toContain('import { CustomProviderCards } from "./custom-provider-cards"')
+    expect(source).toContain("<CustomProviderCards />")
+    expect(source).toContain('LLM_PRESETS.filter((p) => p.id !== "custom")')
+  })
 })

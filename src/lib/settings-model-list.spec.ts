@@ -114,12 +114,18 @@ describe("settings model list", () => {
   })
 
   it("reads the configured local Codex CLI model from Tauri detection", async () => {
-    vi.mocked(invoke).mockResolvedValueOnce({
-      installed: true,
-      version: "codex-cli 0.137.0",
-      path: "C:/Users/Administrator/AppData/Roaming/npm/codex.cmd",
-      model: "gpt-5.4",
-      error: null,
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "codex_cli_list_models") throw new Error("unsupported")
+      if (command === "codex_cli_detect") {
+        return {
+          installed: true,
+          version: "codex-cli 0.137.0",
+          path: "C:/Users/Administrator/AppData/Roaming/npm/codex.cmd",
+          model: "gpt-5.4",
+          error: null,
+        }
+      }
+      throw new Error(`unexpected command ${command}`)
     })
 
     const { fetchLlmModelList } = await import("./settings-model-list")
@@ -131,5 +137,21 @@ describe("settings model list", () => {
 
     expect(invoke).toHaveBeenCalledWith("codex_cli_detect")
     expect(result.models).toEqual(["gpt-5.4"])
+  })
+
+  it("fetches the Codex CLI model catalog when available", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce({
+      models: ["gpt-5.5", "gpt-5.4-mini", "gpt-5.4"],
+    })
+
+    const { fetchLlmModelList } = await import("./settings-model-list")
+    const result = await fetchLlmModelList(customConfig({
+      provider: "codex-cli",
+      apiKey: "",
+      model: "gpt-5.5",
+    }))
+
+    expect(invoke).toHaveBeenCalledWith("codex_cli_list_models")
+    expect(result.models).toEqual(["gpt-5.4", "gpt-5.4-mini", "gpt-5.5"])
   })
 })

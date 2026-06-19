@@ -128,7 +128,11 @@ export class DataSourceRegistry {
       writingStyle: "",
       searchResults: "",
       graphSearchResults: "",
-      revisionFeedback: [],
+      revisionFeedback: {
+        mustFix: [],
+        shouldImprove: [],
+        carryToNextChapter: [],
+      },
       cognitionText: "",
       soulDoc: "",
       characterAuras: "",

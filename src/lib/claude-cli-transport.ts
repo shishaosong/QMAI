@@ -12,14 +12,17 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import type { LlmConfig } from "@/stores/wiki-store"
+import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
+import { normalizePath } from "@/lib/path-utils"
 import type { ChatMessage, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
 
 /**
  * Public parse entry point. Given one stream-json line from claude's
  * stdout, returns any assistant text it contains (or null for events
- * that carry no user-visible text: session init, tool_use, result, etc.).
+ * that carry no user-visible text: session init, tool_use, telemetry, etc.
+ * Newer Claude CLI builds may also put the final visible answer in a
+ * `result.result` field, so that is treated as a final text fallback.
  *
  * State is carried in a small closure because `assistant` events ship
  * the full in-progress message on every emission (NOT incremental), but
@@ -28,11 +31,21 @@ import type { StreamCallbacks } from "./llm-client"
  * when they arrive and skip the fat `assistant` events after seeing one.
  */
 export function createClaudeCodeStreamParser() {
-  let sawDelta = false
-  // Track the running text we have emitted for the current assistant
-  // turn via `assistant` events so we can diff new content off the end
-  // and only emit what wasn't already streamed.
-  let emittedFromAssistant = ""
+  let emittedText = ""
+
+  const emitNovelText = (text: string): string | null => {
+    if (!text) return null
+    if (text.startsWith(emittedText)) {
+      const novel = text.slice(emittedText.length)
+      emittedText = text
+      return novel || null
+    }
+    if (emittedText.length === 0) {
+      emittedText = text
+      return text
+    }
+    return null
+  }
 
   return function parseLine(rawLine: string): string | null {
     const line = rawLine.trim()
@@ -56,7 +69,7 @@ export function createClaudeCodeStreamParser() {
       if (event?.type === "content_block_delta") {
         const delta = event.delta as Record<string, unknown> | undefined
         if (delta?.type === "text_delta" && typeof delta.text === "string") {
-          sawDelta = true
+          emittedText += delta.text
           return delta.text
         }
       }
@@ -76,24 +89,14 @@ export function createClaudeCodeStreamParser() {
           return cc.type === "text" && typeof cc.text === "string" ? cc.text : ""
         })
         .join("")
-      if (!text) return null
-
-      if (sawDelta) {
-        // Deltas already covered this turn; skip the fat assistant event.
-        return null
-      }
-      if (text.startsWith(emittedFromAssistant)) {
-        const novel = text.slice(emittedFromAssistant.length)
-        emittedFromAssistant = text
-        return novel || null
-      }
-      // Non-prefix change: cli sent something different than expected.
-      // Reset tracker and emit the new text wholesale.
-      emittedFromAssistant = text
-      return text
+      return emitNovelText(text)
     }
 
-    // Ignore session init, tool_use, result summary, unknown types.
+    if (type === "result" && obj.subtype === "success" && typeof obj.result === "string") {
+      return emitNovelText(obj.result)
+    }
+
+    // Ignore session init, thinking-token telemetry, tool_use, unknown types.
     return null
   }
 }
@@ -108,6 +111,12 @@ type SpawnPayload = Record<string, unknown> & {
   model: string
   messages: ChatMessage[]
   isolateLocalConfig: boolean
+  projectPath?: string
+}
+
+function currentProjectPath(): string | undefined {
+  const path = useWikiStore.getState().project?.path?.trim()
+  return path ? normalizePath(path) : undefined
 }
 
 /**
@@ -252,6 +261,7 @@ export async function streamClaudeCodeCli(
       model: config.model,
       messages,
       isolateLocalConfig: config.localCliIsolation === true,
+      projectPath: currentProjectPath(),
     }
     await invoke("claude_cli_spawn", payload)
     if (aborted || signal?.aborted) {

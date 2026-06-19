@@ -94,4 +94,119 @@ describe("WikiEditor immersive writing", () => {
     act(() => root.unmount())
     document.body.removeChild(container)
   })
+
+  it("preserves the reading scroll position while editing chapter body", async () => {
+    const lines = Array.from({ length: 80 }, (_, index) => `第${index + 1}行正文内容`)
+
+    function ControlledEditor() {
+      const [content, setContent] = useState(`# 第1章\n\n${lines.join("\n")}`)
+      return (
+        <div data-scroll-root style={{ height: "200px", overflowY: "auto" }}>
+          <WikiEditor
+            content={content}
+            onSave={(markdown) => setContent(formatChapterWriting(markdown))}
+            immersiveWriting
+          />
+        </div>
+      )
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    await act(async () => {
+      root.render(<ControlledEditor />)
+      await nextFrame()
+    })
+
+    const scrollRoot = container.querySelector("[data-scroll-root]") as HTMLDivElement | null
+    const textarea = container.querySelector("textarea")
+    expect(scrollRoot).not.toBeNull()
+    expect(textarea).not.toBeNull()
+    if (!scrollRoot || !textarea) throw new Error("editor not found")
+
+    scrollRoot.scrollTop = 420
+    textarea.focus()
+    const editAt = textarea.value.indexOf("第40行")
+    textarea.setSelectionRange(editAt, editAt)
+
+    await act(async () => {
+      textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }))
+      scrollRoot.scrollTop = 777
+      setTextareaValue(textarea, `${textarea.value.slice(0, editAt)}修改后的${textarea.value.slice(editAt)}`)
+      await nextFrame()
+      await nextFrame()
+    })
+
+    expect(scrollRoot.scrollTop).toBe(420)
+
+    act(() => root.unmount())
+    document.body.removeChild(container)
+  })
+
+  it("does not scroll to the beginning after deleting a line while editing", async () => {
+    const lines = Array.from({ length: 80 }, (_, index) => `line-${index + 1} body`)
+    const originalFocus = HTMLTextAreaElement.prototype.focus
+
+    function ControlledEditor() {
+      const [content, setContent] = useState(`# Chapter\n\n${lines.join("\n")}`)
+      return (
+        <div data-scroll-root style={{ height: "200px", overflowY: "auto" }}>
+          <WikiEditor
+            content={content}
+            onSave={(markdown) => setContent(formatChapterWriting(markdown))}
+            immersiveWriting
+          />
+        </div>
+      )
+    }
+
+    HTMLTextAreaElement.prototype.focus = function focus(options?: FocusOptions) {
+      originalFocus.call(this)
+      if (!options?.preventScroll) {
+        const scrollRoot = this.closest("[data-scroll-root]") as HTMLDivElement | null
+        if (scrollRoot) scrollRoot.scrollTop = 0
+      }
+    }
+
+    const container = document.createElement("div")
+    document.body.appendChild(container)
+    const root = createRoot(container)
+
+    try {
+      await act(async () => {
+        root.render(<ControlledEditor />)
+        await nextFrame()
+      })
+
+      const scrollRoot = container.querySelector("[data-scroll-root]") as HTMLDivElement | null
+      const textarea = container.querySelector("textarea")
+      expect(scrollRoot).not.toBeNull()
+      expect(textarea).not.toBeNull()
+      if (!scrollRoot || !textarea) throw new Error("editor not found")
+
+      textarea.focus()
+      scrollRoot.scrollTop = 520
+
+      const lineStart = textarea.value.indexOf("line-40")
+      expect(lineStart).toBeGreaterThanOrEqual(0)
+      const lineEnd = textarea.value.indexOf("\n", lineStart)
+      const deleteEnd = lineEnd >= 0 ? lineEnd + 1 : textarea.value.length
+      textarea.setSelectionRange(lineStart, deleteEnd)
+
+      await act(async () => {
+        textarea.dispatchEvent(new KeyboardEvent("keydown", { key: "Delete", bubbles: true, cancelable: true }))
+        setTextareaValue(textarea, `${textarea.value.slice(0, lineStart)}${textarea.value.slice(deleteEnd)}`)
+        await nextFrame()
+        await nextFrame()
+      })
+
+      expect(scrollRoot.scrollTop).toBe(520)
+    } finally {
+      act(() => root.unmount())
+      document.body.removeChild(container)
+      HTMLTextAreaElement.prototype.focus = originalFocus
+    }
+  })
 })

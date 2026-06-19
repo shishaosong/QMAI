@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Editor, rootCtx, defaultValueCtx } from "@milkdown/kit/core"
 import { commonmark } from "@milkdown/kit/preset/commonmark"
 import { gfm } from "@milkdown/kit/preset/gfm"
@@ -41,6 +41,48 @@ interface FloatingToolbarPosition {
   left: number
 }
 
+type ScrollSnapshot = Array<{
+  element: HTMLElement
+  scrollLeft: number
+  scrollTop: number
+}>
+
+function captureAncestorScroll(element: HTMLElement | null): ScrollSnapshot {
+  const snapshot: ScrollSnapshot = []
+  let current = element
+  while (current) {
+    snapshot.push({
+      element: current,
+      scrollLeft: current.scrollLeft,
+      scrollTop: current.scrollTop,
+    })
+    current = current.parentElement
+  }
+  return snapshot
+}
+
+function restoreAncestorScroll(snapshot: ScrollSnapshot) {
+  for (const item of snapshot) {
+    item.element.scrollLeft = item.scrollLeft
+    item.element.scrollTop = item.scrollTop
+  }
+}
+
+function restoreAncestorScrollSoon(snapshot: ScrollSnapshot) {
+  restoreAncestorScroll(snapshot)
+  requestAnimationFrame(() => {
+    restoreAncestorScroll(snapshot)
+    requestAnimationFrame(() => restoreAncestorScroll(snapshot))
+  })
+  window.setTimeout(() => restoreAncestorScroll(snapshot), 0)
+}
+
+function focusWithoutChangingScroll(element: HTMLElement) {
+  const snapshot = captureAncestorScroll(element)
+  element.focus({ preventScroll: true })
+  restoreAncestorScrollSoon(snapshot)
+}
+
 function WritingTextarea({
   content,
   onSave,
@@ -54,15 +96,45 @@ function WritingTextarea({
   const [value, setValue] = useState(initial.body)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const previousBodyRef = useRef(initial.body)
+  const contentSyncMountedRef = useRef(false)
+  const pendingScrollSnapshotRef = useRef<ScrollSnapshot | null>(null)
   const [selection, setSelection] = useState<ChapterBodySelection | null>(null)
   const [toolbarPosition, setToolbarPosition] = useState<FloatingToolbarPosition | null>(null)
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const { heading: h, body: b } = splitChapterHeading(content)
-    if (document.activeElement === textareaRef.current) {
+    const el = textareaRef.current
+    const isFocused = document.activeElement === el
+    const focusedScrollSnapshot = isFocused ? captureAncestorScroll(el) : null
+    const focusedSelection = isFocused && el
+      ? { start: el.selectionStart, end: el.selectionEnd }
+      : null
+
+    const restoreFocusedEditState = () => {
+      if (!focusedScrollSnapshot) return
+      requestAnimationFrame(() => {
+        const current = textareaRef.current
+        if (focusedSelection && document.activeElement === current && current) {
+          const start = Math.min(focusedSelection.start, current.value.length)
+          const end = Math.min(focusedSelection.end, current.value.length)
+          current.setSelectionRange(start, end)
+        }
+        restoreAncestorScrollSoon(focusedScrollSnapshot)
+      })
+    }
+
+    if (contentSyncMountedRef.current && heading === h && value === b) {
+      previousBodyRef.current = b
+      restoreFocusedEditState()
+      return
+    }
+    contentSyncMountedRef.current = true
+
+    if (isFocused) {
       const normalizedDraft = splitChapterHeading(formatChapterWriting(rebuildChapterBody(heading, value)))
       if (normalizedDraft.heading === h && normalizedDraft.body === b && (heading !== h || value !== b)) {
         previousBodyRef.current = value
+        restoreFocusedEditState()
         return
       }
     }
@@ -72,12 +144,16 @@ function WritingTextarea({
     setValue(b)
     setSelection(null)
     setToolbarPosition(null)
+    restoreFocusedEditState()
     if (!autoFocus) return
     requestAnimationFrame(() => {
       const el = textareaRef.current
       if (!el) return
-      const shouldMoveCaretToEnd = document.activeElement !== el || (previousBody.length === 0 && b.length > 0)
-      el.focus()
+      const isAlreadyFocused = document.activeElement === el
+      const shouldMoveCaretToEnd = !isAlreadyFocused || (previousBody.length === 0 && b.length > 0)
+      if (!isAlreadyFocused) {
+        focusWithoutChangingScroll(el)
+      }
       if (shouldMoveCaretToEnd) {
         const caret = el.value.length
         el.setSelectionRange(caret, caret)
@@ -99,9 +175,31 @@ function WritingTextarea({
     [],
   )
 
-  useEffect(() => {
+  const captureScrollForLocalEdit = useCallback(() => {
+    pendingScrollSnapshotRef.current = captureAncestorScroll(textareaRef.current)
+  }, [])
+
+  const ensureScrollForLocalEdit = useCallback(() => {
+    if (!pendingScrollSnapshotRef.current) {
+      captureScrollForLocalEdit()
+    }
+  }, [captureScrollForLocalEdit])
+
+  const restorePendingLocalEditScroll = useCallback(() => {
+    const snapshot = pendingScrollSnapshotRef.current
+    if (!snapshot) return
+    restoreAncestorScrollSoon(snapshot)
+    window.setTimeout(() => {
+      if (pendingScrollSnapshotRef.current === snapshot) {
+        pendingScrollSnapshotRef.current = null
+      }
+    }, 120)
+  }, [])
+
+  useLayoutEffect(() => {
     resize()
-  }, [value, resize])
+    restorePendingLocalEditScroll()
+  }, [value, resize, restorePendingLocalEditScroll])
 
   useEffect(() => {
     const el = textareaRef.current
@@ -238,7 +336,12 @@ function WritingTextarea({
       <textarea
         ref={textareaRef}
         value={value}
+        onBeforeInput={captureScrollForLocalEdit}
+        onPaste={captureScrollForLocalEdit}
+        onCut={captureScrollForLocalEdit}
+        onCompositionStart={captureScrollForLocalEdit}
         onChange={(e) => {
+          ensureScrollForLocalEdit()
           const next = e.target.value
           setValue(next)
           setSelection(null)
@@ -259,19 +362,28 @@ function WritingTextarea({
           }, 0)
         }}
         onKeyDown={(e) => {
+          if (
+            e.key === "Backspace" ||
+            e.key === "Delete" ||
+            (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey)
+          ) {
+            captureScrollForLocalEdit()
+          }
           if (e.key !== "Enter") return
           e.preventDefault()
           const target = e.currentTarget
           const start = target.selectionStart
           const end = target.selectionEnd
-          const next = `${value.slice(0, start)}\n　　${value.slice(end)}`
+          const next = `${value.slice(0, start)}\n${value.slice(end)}`
+          captureScrollForLocalEdit()
           setValue(next)
           rebuild(heading, next)
           requestAnimationFrame(() => {
-            const caret = start + 3
+            const caret = start + 1
             target.selectionStart = caret
             target.selectionEnd = caret
             resize()
+            restorePendingLocalEditScroll()
           })
         }}
         className="w-full resize-none overflow-hidden border-0 bg-transparent p-0 text-lg leading-8 text-foreground outline-none"

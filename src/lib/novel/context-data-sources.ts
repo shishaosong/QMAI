@@ -8,7 +8,7 @@ import { searchWiki } from "@/lib/search"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { parseChapterMeta } from "./chapter-meta"
 import { listSnapshots, loadSnapshot, type ChapterSnapshot } from "./chapter-ingest"
-import { loadRevisionFeedbackForContext } from "./revision-feedback"
+import { createEmptyRevisionFeedback, loadRevisionFeedbackForContext } from "./revision-feedback"
 import { loadCognitionState, cognitionToContextText } from "./character-cognition"
 import { getChapterVolumes } from "./volume"
 import { readSoulDoc } from "./soul-doc"
@@ -336,7 +336,7 @@ export const revisionFeedbackDataSource: DataSource<any> = {
   name: "revisionFeedback",
   priority: 15,
   async load(context: ContextLoadContext): Promise<any> {
-    if (!context.chapterNumber) return []
+    if (!context.chapterNumber) return createEmptyRevisionFeedback()
     return await loadRevisionFeedbackForContext(
       context.projectPath,
       context.chapterNumber,

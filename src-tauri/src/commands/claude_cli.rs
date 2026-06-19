@@ -17,6 +17,7 @@
 //! capabilities JSON.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,7 +30,8 @@ use tokio::sync::Mutex;
 
 use super::cli_resolver::find_cli_command;
 use super::local_cli_config::{
-    apply_local_cli_environment, read_claude_local_config, resolve_home_dir, LocalCliConfigInfo,
+    apply_local_cli_environment, read_claude_local_config, resolve_cli_project_dir,
+    resolve_home_dir, LocalCliConfigInfo,
 };
 
 /// Shared state holding running `claude` child processes keyed by the
@@ -118,7 +120,7 @@ fn claude_content_blocks(content: &ClaudeContent) -> Vec<serde_json::Value> {
     }
 }
 
-async fn find_claude_command() -> Result<std::path::PathBuf, String> {
+async fn find_claude_command() -> Result<PathBuf, String> {
     find_cli_command("claude", &["claude.cmd", "claude.exe"]).await
 }
 
@@ -223,6 +225,7 @@ pub async fn claude_cli_spawn(
     model: String,
     messages: Vec<ClaudeMessage>,
     isolate_local_config: bool,
+    project_path: Option<String>,
 ) -> Result<(), String> {
     // Build the turn list: fold any system messages into a preamble on
     // the first user turn rather than using a CLI flag, because
@@ -263,10 +266,18 @@ pub async fn claude_cli_spawn(
         .collect();
 
     let claude = find_claude_command().await?;
+    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
     let mut cmd = Command::new(&claude);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
-    cmd.args(build_claude_cli_args(&model, isolate_local_config));
+    if let Some(dir) = &project_dir {
+        cmd.current_dir(dir);
+    }
+    cmd.args(build_claude_cli_args(
+        &model,
+        isolate_local_config,
+        project_dir.as_deref(),
+    ));
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -393,7 +404,11 @@ pub async fn claude_cli_spawn(
     Ok(())
 }
 
-fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
+fn build_claude_cli_args(
+    model: &str,
+    isolate_local_config: bool,
+    project_dir: Option<&Path>,
+) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         "--output-format".to_string(),
@@ -417,6 +432,10 @@ fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String>
             "--prompt-suggestions".to_string(),
             "false".to_string(),
         ]);
+    }
+
+    if let Some(dir) = project_dir {
+        args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
     }
 
     if !model.trim().is_empty() {
@@ -490,7 +509,7 @@ mod tests {
 
     #[test]
     fn claude_args_do_not_isolate_local_config_by_default() {
-        let args = build_claude_cli_args("sonnet", false);
+        let args = build_claude_cli_args("sonnet", false, None);
 
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -501,7 +520,7 @@ mod tests {
 
     #[test]
     fn claude_args_can_isolate_user_config_tools_and_mcp() {
-        let args = build_claude_cli_args("sonnet", true);
+        let args = build_claude_cli_args("sonnet", true, None);
 
         assert!(args
             .windows(2)
@@ -522,7 +541,17 @@ mod tests {
 
     #[test]
     fn claude_args_skip_model_flag_when_model_is_empty() {
-        let args = build_claude_cli_args("", false);
+        let args = build_claude_cli_args("", false, None);
         assert!(!args.contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn claude_args_allow_current_project_directory() {
+        let dir = Path::new("novel-project");
+        let args = build_claude_cli_args("sonnet", false, Some(dir));
+
+        assert!(args
+            .windows(2)
+            .any(|pair| pair[0] == "--add-dir" && pair[1] == "novel-project"));
     }
 }

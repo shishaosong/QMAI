@@ -144,6 +144,7 @@ pub fn run() {
             commands::claude_cli::claude_cli_spawn,
             commands::claude_cli::claude_cli_kill,
             commands::codex_cli::codex_cli_detect,
+            commands::codex_cli::codex_cli_list_models,
             commands::codex_cli::codex_cli_spawn,
             commands::codex_cli::codex_cli_kill,
             commands::extract_images::extract_pdf_images_cmd,
@@ -194,7 +195,11 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app, event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
                 if !has_visible_windows {
                     use tauri::Manager;
                     if let Some(window) = app.get_webview_window("main") {

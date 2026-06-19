@@ -10,6 +10,7 @@ import { fetchLlmModelList } from "@/lib/settings-model-list"
 import { testSettingsLlmModel } from "@/lib/settings-model-test"
 import { useTranslation } from "react-i18next"
 import { ReasoningControls } from "./llm-provider-section"
+import { isCustomProviderConfigId } from "../llm-preset-utils"
 
 interface CustomProviderCard {
   id: string
@@ -32,12 +33,12 @@ export function CustomProviderCards() {
 
   // Load existing custom provider configs as cards
   const [cards, setCards] = useState<CustomProviderCard[]>(() => {
-    const customKeys = Object.keys(providerConfigs).filter((k) => k.startsWith("custom-"))
+    const customKeys = Object.keys(providerConfigs).filter(isCustomProviderConfigId)
     return customKeys.map((key) => {
       const config = providerConfigs[key]
       return {
         id: key,
-        label: config.label || "自定义模型",
+        label: config.label || config.name || "自定义模型",
         apiMode: config.apiMode || "chat_completions",
         baseUrl: config.baseUrl || "",
         apiKey: config.apiKey || "",
@@ -51,7 +52,8 @@ export function CustomProviderCards() {
   })
 
   function addCard() {
-    const newId = `custom-${Date.now()}`
+    const now = Date.now()
+    const newId = `custom-${now}`
     const newCard: CustomProviderCard = {
       id: newId,
       label: "自定义模型",
@@ -69,12 +71,14 @@ export function CustomProviderCards() {
       ...providerConfigs,
       [newId]: {
         label: newCard.label,
+        name: newCard.label,
         apiMode: newCard.apiMode,
         baseUrl: newCard.baseUrl,
         apiKey: newCard.apiKey,
         model: newCard.model,
         enabled: true,
         savedModels: newCard.savedModels,
+        createdAt: now,
       },
     }
     setProviderConfigs(newConfigs)
@@ -89,6 +93,7 @@ export function CustomProviderCards() {
     const updatedConfig: ProviderOverride = {
       ...prev,
       label: updates.label ?? prev.label,
+      name: updates.label ?? prev.name,
       apiMode: updates.apiMode ?? prev.apiMode,
       baseUrl: updates.baseUrl ?? prev.baseUrl,
       apiKey: updates.apiKey ?? prev.apiKey,

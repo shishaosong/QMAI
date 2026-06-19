@@ -1,5 +1,5 @@
 import { getProviderConfig, withCustomOriginHeader } from "@/lib/llm-providers"
-import { detectLocalCliConfig } from "@/lib/local-cli-config"
+import { detectLocalCliConfig, listCodexCliModels } from "@/lib/local-cli-config"
 import { isDirectRerankEndpoint } from "@/lib/rerank-api"
 import { getHttpFetch } from "@/lib/tauri-fetch"
 import type { EmbeddingConfig, LlmConfig, RerankConfig } from "@/stores/wiki-store"
@@ -166,6 +166,17 @@ async function fetchModelList(url: string, headers: Record<string, string>, _cur
 }
 
 async function fetchLocalCliModel(config: LlmConfig): Promise<LlmModelListResult> {
+  if (config.provider === "codex-cli") {
+    try {
+      const listed = await listCodexCliModels()
+      const models = toModelListResult([config.model, ...(listed.models ?? [])])
+      if (models.models.length > 0) return models
+    } catch {
+      // Fall back to the current configured model below. Older Codex CLI
+      // builds may not have `debug models`.
+    }
+  }
+
   const explicitModel = config.model.trim()
   if (explicitModel) return { models: [explicitModel] }
 

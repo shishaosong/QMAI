@@ -18,6 +18,7 @@ import { createChapterPipeline } from "./chapter-pipeline"
 import { mergeSnapshotTimeline } from "./timeline"
 import { buildStructuredMemoryDocuments, isValidMemorySnapshot } from "./memory-rebuild"
 import { clearGraphCache } from "@/lib/graph-relevance"
+import { parseJsonObjectFromModelOutput } from "@/lib/model-json"
 
 export interface ValidationWarning {
   type: "entity_new" | "canon_conflict"
@@ -519,8 +520,74 @@ async function extractSnapshotWithLLM(
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)
 
+  const snapshotExample = {
+    chapterId: `chapter-${chapterNumber}`,
+    chapterNumber,
+    summary: "章节摘要（200字以内）",
+    characters: ["出场人物列表"],
+    characterAliases: { 人物正式名: ["昵称", "小名", "旧名"] },
+    locations: ["出场地点列表"],
+    organizations: ["出场组织列表"],
+    items: ["出场物品列表"],
+    events: ["关键事件列表"],
+    characterStateChanges: ["人物状态变化描述"],
+    relationshipChanges: ["人物关系变化描述"],
+    knowledgeChanges: ["角色认知变化描述"],
+    foreshadowingChanges: ["伏笔变化描述（新增/推进/回收）"],
+    newCanonFacts: ["新增正史设定"],
+    timelineEvents: ["时间线事件"],
+    conflicts: ["冲突变化描述"],
+    endingHook: "章节结尾钩子描述",
+    graphNodes: ["图谱节点列表"],
+    graphEdges: ["图谱关系边列表，格式：A->关系->B"],
+    characterDetails: {
+      人物名: {
+        identity: "身份（具体身份描述）",
+        faction: "阵营（所属势力或立场）",
+        goals: "目标（当前章节中的目标）",
+        arcChange: "弧光变化（本章中该人物的成长或变化）",
+      },
+    },
+    locationDetails: {
+      地点名: {
+        region: "区域（所属地理区域）",
+        type: "类型（场景类型，如宫殿、森林、密室等）",
+        controller: "控制者（当前控制该地点的势力或人物）",
+        hiddenInfo: "隐藏信息（地点中的秘密或未揭示的设定）",
+      },
+    },
+    organizationDetails: {
+      组织名: {
+        leader: "领导者",
+        members: "成员（本章出现或提及的成员）",
+        goals: "目标（组织当前的目标）",
+        resources: "资源（组织掌控的资源）",
+      },
+    },
+    itemDetails: {
+      物品名: {
+        holder: "当前持有者",
+        previousHolders: "前持有者",
+        abilities: "能力（物品的功能或能力）",
+        limitations: "限制（使用限制或副作用）",
+        origin: "来源（物品的来历）",
+      },
+    },
+    eventDetails: {
+      事件名: {
+        cause: "起因（事件的触发原因）",
+        process: "过程（事件的发展过程）",
+        relatedForeshadowing: "关联伏笔（与此事件相关的伏笔）",
+        relatedConflicts: "关联冲突（与此事件相关的冲突）",
+        followUpItems: "后续事项（事件引发的后续影响或待处理事项）",
+      },
+    },
+  }
+
   const systemPrompt = `你是一个专业的小说编辑助手。你的任务是从给定的章节正文中提取结构化信息。
-请严格按照 JSON 格式输出，不要输出任何其他内容。
+只输出一个合法 JSON 对象，不要输出 Markdown、解释、注释或额外文本。
+所有字符串必须使用双引号；字符串内部如果需要双引号，必须转义为 \\"。
+如果某个字段没有内容，请使用空数组 []、空字符串 ""，或省略可选详情字段。
 ${langReminder}`
 
   const userPrompt = `请从以下章节中提取结构化信息，输出 JSON：
@@ -530,70 +597,8 @@ ${langReminder}`
 章节正文：
 ${chapterBody.slice(0, 8000)}
 
-请输出以下格式的 JSON：
-{
-  "chapterId": "chapter-${chapterNumber}",
-  "chapterNumber": ${chapterNumber},
-  "summary": "章节摘要（200字以内）",
-  "characters": ["出场人物列表"],
-  "characterAliases": { "人物正式名": ["昵称", "小名", "旧名"] },
-  "locations": ["出场地点列表"],
-  "organizations": ["出场组织列表"],
-  "items": ["出场物品列表"],
-  "events": ["关键事件列表"],
-  "characterStateChanges": ["人物状态变化描述"],
-  "relationshipChanges": ["人物关系变化描述"],
-  "knowledgeChanges": ["角色认知变化描述"],
-  "foreshadowingChanges": ["伏笔变化描述（新增/推进/回收）"],
-  "newCanonFacts": ["新增正史设定"],
-  "timelineEvents": ["时间线事件"],
-  "conflicts": ["冲突变化描述"],
-  "endingHook": "章节结尾钩子描述",
-  "graphNodes": ["图谱节点列表"],
-  "graphEdges": ["图谱关系边列表，格式：A->关系->B"],
-  "characterDetails": {
-    "人物名": {
-      "identity": "身份（具体身份描述）",
-      "faction": "阵营（所属势力或立场）",
-      "goals": "目标（当前章节中的目标）",
-      "arcChange": "弧光变化（本章中该人物的成长或变化）"
-    }
-  },
-  "locationDetails": {
-    "地点名": {
-      "region": "区域（所属地理区域）",
-      "type": "类型（场景类型，如宫殿、森林、密室等）",
-      "controller": "控制者（当前控制该地点的势力或人物）",
-      "hiddenInfo": "隐藏信息（地点中的秘密或未揭示的设定）"
-    }
-  },
-  "organizationDetails": {
-    "组织名": {
-      "leader": "领导者",
-      "members": "成员（本章出现或提及的成员）",
-      "goals": "目标（组织当前的目标）",
-      "resources": "资源（组织掌控的资源）"
-    }
-  },
-  "itemDetails": {
-    "物品名": {
-      "holder": "当前持有者",
-      "previousHolders": "前持有者",
-      "abilities": "能力（物品的功能或能力）",
-      "limitations": "限制（使用限制或副作用）",
-      "origin": "来源（物品的来历）"
-    }
-  },
-  "eventDetails": {
-    "事件名": {
-      "cause": "起因（事件的触发原因）",
-      "process": "过程（事件的发展过程）",
-      "relatedForeshadowing": "关联伏笔（与此事件相关的伏笔）",
-      "relatedConflicts": "关联冲突（与此事件相关的冲突）",
-      "followUpItems": "后续事项（事件引发的后续影响或待处理事项）"
-    }
-  }
-}
+请严格按这个 JSON 对象结构输出：
+${JSON.stringify(snapshotExample, null, 2)}
 
 注意：如果同一个人物在正文里有昵称、小名、旧名或全名，请把正式名放进 characters，把其他称呼放进 characterAliases，不要把同一人物拆成多个 characters。
 注意：characterDetails、locationDetails、organizationDetails、itemDetails、eventDetails 仅在章节中确实有相关信息时才填写；如果某个字段没有相关信息，直接省略该字段即可。`
@@ -619,12 +624,7 @@ ${chapterBody.slice(0, 8000)}
     await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(DEFAULT_LLM_REQUEST_TIMEOUT_MS))
     if (streamError) throw streamError
 
-    const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.match(/\{[\s\S]*\}/) ?? result.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) {
-      throw new Error("章节快照提取失败：模型没有返回可解析的 JSON")
-    }
-
-    const parsed = JSON.parse(jsonMatch[0])
+    const parsed = parseJsonObjectFromModelOutput(result)
     return normalizeChapterSnapshot({
       ...parsed,
       chapterId: parsed.chapterId || `chapter-${chapterNumber}`,

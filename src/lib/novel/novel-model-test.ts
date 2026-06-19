@@ -17,6 +17,21 @@ const TEST_PROMPTS: Record<TestableNovelModelTask, string> = {
   extract: "你正在执行小说资料提取模型测试。请只回复“提取模型测试成功”。",
 }
 
+const DEFAULT_TEST_TIMEOUT_MS = 30_000
+const LOCAL_CLI_TEST_TIMEOUT_MS = 3 * 60_000
+const MAX_LOCAL_CLI_TEST_TIMEOUT_MS = 10 * 60_000
+
+function resolveNovelModelTestTimeoutMs(config: LlmConfig): number {
+  if (config.provider === "codex-cli") {
+    const configuredMs = Math.max(1, Math.min(10, config.codexCliTimeoutMinutes ?? 10)) * 60_000
+    return Math.max(LOCAL_CLI_TEST_TIMEOUT_MS, Math.min(configuredMs, MAX_LOCAL_CLI_TEST_TIMEOUT_MS))
+  }
+  if (config.provider === "claude-code") {
+    return LOCAL_CLI_TEST_TIMEOUT_MS
+  }
+  return DEFAULT_TEST_TIMEOUT_MS
+}
+
 export async function testNovelModel(
   llmConfig: LlmConfig,
   novelConfig: NovelConfig,
@@ -43,7 +58,7 @@ export async function testNovelModel(
         streamError = error
       },
     },
-    AbortSignal.timeout(30000),
+    AbortSignal.timeout(resolveNovelModelTestTimeoutMs(effectiveConfig)),
     { temperature: 0 },
   )
 
