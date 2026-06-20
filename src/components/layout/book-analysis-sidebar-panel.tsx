@@ -7,7 +7,7 @@ import { useEffect, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useBookAnalysisStore } from "@/stores/book-analysis-store"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Trash2, RefreshCw } from "lucide-react"
+import { BookOpen, Trash2, RefreshCw, Loader2 } from "lucide-react"
 import { listDirectory, readFile, deleteFile } from "@/commands/fs"
 import { joinPath, normalizePath } from "@/lib/path-utils"
 import { toast } from "@/lib/toast"
@@ -33,10 +33,14 @@ export function BookAnalysisSidebarPanel() {
   const project = useWikiStore((s) => s.project)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const { setSelectedLibraryBookId, sidebarRefreshCounter, triggerSidebarRefresh } = useBookAnalysisStore()
+  const tasks = useBookAnalysisStore((s) => s.tasks)
   const [books, setBooks] = useState<BookItem[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
   const [bookAuraCount, setBookAuraCount] = useState<Record<string, number>>({})
+
+  // 正在运行的任务（用于显示进度）
+  const runningTasks = tasks.filter((t) => t.status === "running")
 
   useEffect(() => {
     if (project?.path) {
@@ -266,6 +270,34 @@ export function BookAnalysisSidebarPanel() {
           ))
         )}
       </div>
+
+      {/* 提取进度区域 */}
+      {runningTasks.length > 0 && (
+        <div className="shrink-0 border-t px-3 py-2 space-y-2">
+          {runningTasks.map((task) => {
+            const stageLabel = task.progress.stageLabel || "处理中"
+            const percentage = task.progress.percentage ?? 0
+            return (
+              <div key={task.id} className="space-y-1">
+                <div className="flex items-center gap-1.5 text-xs">
+                  <Loader2 className="h-3 w-3 animate-spin text-primary" />
+                  <span className="font-medium text-foreground truncate">{stageLabel}</span>
+                  <span className="ml-auto text-muted-foreground shrink-0">{percentage}%</span>
+                </div>
+                <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
+                {task.progress.currentItem && (
+                  <div className="text-xs text-muted-foreground truncate">{task.progress.currentItem}</div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

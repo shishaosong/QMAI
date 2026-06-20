@@ -944,18 +944,55 @@ export function BookAnalysisView() {
       return
     }
     setStyleExtracting(true)
+
+    // 创建 store task 以便侧栏显示进度
+    const taskId = useBookAnalysisStore.getState().startTask(currentProject.path, {
+      sourceType: "file",
+      sourcePath: selectedLibraryBook.path,
+      selectedChapters: [],
+    })
+    useBookAnalysisStore.getState().updateTaskBookData(taskId, selectedLibraryBook.id, [])
+    useBookAnalysisStore.getState().updateTaskProgress(taskId, {
+      stage: "extracting_style",
+      stageLabel: "提取文风",
+      percentage: 0,
+    })
+
     try {
-      toast.info("正在提取作品文风，请稍候…")
+      const progressMap: Record<string, number> = {
+        "读取章节列表…": 10,
+        "读取": 25,
+        "正在分析作品文风…": 50,
+        "保存文风画像…": 90,
+      }
       const profile = await analyzeWritingStyle(selectedLibraryBook.path, llmConfig, {
-        onProgress: (msg) => console.log("[文风提取]", msg),
+        onProgress: (msg) => {
+          const pct = Object.entries(progressMap).find(([k]) => msg.includes(k))?.[1]
+          if (pct !== undefined) {
+            useBookAnalysisStore.getState().updateTaskProgress(taskId, {
+              stage: "extracting_style",
+              stageLabel: "提取文风",
+              percentage: pct,
+              currentItem: msg,
+            })
+          }
+        },
       })
-      const task = tasks.find((item) => item.bookId === selectedLibraryBook.id)
-      if (task) useBookAnalysisStore.getState().updateTaskStyleProfile(task.id, profile)
+      useBookAnalysisStore.getState().updateTaskStyleProfile(taskId, profile)
+      useBookAnalysisStore.getState().updateTaskProgress(taskId, {
+        stage: "extracting_style",
+        stageLabel: "提取文风",
+        percentage: 100,
+        currentItem: "完成",
+      })
+      useBookAnalysisStore.getState().completeTask(taskId)
       toast.success("已提取作品文风。")
       await reloadLibraryState()
+      useBookAnalysisStore.getState().triggerSidebarRefresh()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error("[文风提取失败]", msg)
+      useBookAnalysisStore.getState().errorTask(taskId, msg)
       toast.error(`提取文风失败：${msg}`)
     } finally {
       setStyleExtracting(false)
@@ -1077,19 +1114,39 @@ export function BookAnalysisView() {
       return
     }
 
-    // 读取已有章节列表
+    // 读取已有章节列表（从 frontmatter 解析标题和字数）
     const chaptersDir = joinPath(selectedLibraryBook.path, "chapters")
     const chapterFiles = await listDirectory(chaptersDir)
-    const chapters = chapterFiles
-      .filter((f) => !f.is_dir && f.name.endsWith(".md"))
-      .map((f, i) => ({
-        id: f.name.replace(/\.md$/, ""),
-        title: f.name.replace(/\.md$/, ""),
-        order: i,
-        wordCount: 0,
-        path: f.path,
-      }))
-      .sort((a, b) => a.id.localeCompare(b.id))
+    const chapters = (
+      await Promise.all(
+        chapterFiles
+          .filter((f) => !f.is_dir && f.name.endsWith(".md"))
+          .map(async (f, i) => {
+            const id = f.name.replace(/\.md$/, "")
+            let title = id
+            let order = i
+            let wordCount = 0
+            try {
+              const content = await readFile(f.path)
+              const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/)
+              if (fmMatch) {
+                const fm = fmMatch[1]
+                const body = fmMatch[2]
+                const titleMatch = fm.match(/title:\s*(.+)/)
+                const orderMatch = fm.match(/order:\s*(\d+)/)
+                const wordCountMatch = fm.match(/wordCount:\s*(\d+)/)
+                if (titleMatch) title = titleMatch[1].trim()
+                if (orderMatch) order = parseInt(orderMatch[1], 10)
+                if (wordCountMatch) wordCount = parseInt(wordCountMatch[1], 10)
+                else wordCount = body.length
+              }
+            } catch {
+              // 解析失败，使用默认值
+            }
+            return { id, title, order, wordCount, path: f.path }
+          })
+      )
+    ).sort((a, b) => a.id.localeCompare(b.id))
 
     if (chapters.length === 0) {
       toast.error("未找到章节文件，无法重新提取。")

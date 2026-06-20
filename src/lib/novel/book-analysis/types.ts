@@ -55,6 +55,7 @@ export type BookAnalysisStage =
   | "extracting_characters"
   | "analyzing_six_dimension"  // 6 维度细粒度进度（feature/book-analysis-6d-skill）
   | "generating_skills"
+  | "extracting_style"
   | "completed"
   | "error"
 
