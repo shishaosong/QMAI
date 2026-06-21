@@ -162,9 +162,13 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
                 {USAGE_GUIDE_URLS[view] && (
                   <button
                     type="button"
-                    onClick={(e) => {
+                    onPointerDown={(e) => {
                       e.stopPropagation()
                       void openExternalUrl(USAGE_GUIDE_URLS[view])
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      e.preventDefault()
                     }}
                     className="flex items-center justify-center text-muted-foreground transition-colors hover:text-primary"
                     title={t("iconSidebar.usageGuide")}
@@ -241,9 +245,13 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
               {USAGE_GUIDE_URLS.settings && (
                 <button
                   type="button"
-                  onClick={(e) => {
+                  onPointerDown={(e) => {
                     e.stopPropagation()
                     void openExternalUrl(USAGE_GUIDE_URLS.settings)
+                  }}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    e.preventDefault()
                   }}
                   className="flex items-center justify-center text-muted-foreground transition-colors hover:text-primary"
                   title={t("iconSidebar.usageGuide")}
