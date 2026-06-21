@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
 import { saveNovelMode, saveNovelConfig } from "@/lib/project-store"
-import { normalizePath } from "@/lib/path-utils"
-import { exportProject } from "@/lib/novel/export"
+
 import { testNovelModel, type TestableNovelModelTask } from "@/lib/novel/novel-model-test"
 import { ChatModelSelector } from "@/components/chat/chat-model-selector"
 import type { SettingsDraft, DraftSetter } from "../settings-types"
@@ -26,7 +25,6 @@ export function NovelSection({ draft, setDraft }: Props) {
   const setNovelConfigStore = useWikiStore((s) => s.setNovelConfig)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const project = useWikiStore((s) => s.project)
-  const [exportStatus, setExportStatus] = useState<string>("")
   const [testStates, setTestStates] = useState<Record<TestableNovelModelTask, {
     loading: boolean
     message: string
@@ -600,32 +598,6 @@ export function NovelSection({ draft, setDraft }: Props) {
               />
             </button>
           </div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>{t("novel.export.title")}</Label>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              if (!project) return
-              setExportStatus(t("novel.export.exporting"))
-              const pp = normalizePath(project.path)
-              const exportPath = `${pp}/.novel/exports/${new Date().toISOString().slice(0, 10)}`
-              const result = await exportProject({ projectPath: pp, exportPath })
-              setExportStatus(result.success
-                ? t("novel.export.success", { count: result.chapterCount })
-                : t("novel.export.error", { message: result.message }))
-            }}
-            disabled={!project}
-          >
-            {t("novel.export.button")}
-          </Button>
-          {exportStatus ? (
-            <span className="text-xs text-muted-foreground">{exportStatus}</span>
-          ) : null}
         </div>
       </div>
       </div>
