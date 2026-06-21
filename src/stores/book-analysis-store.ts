@@ -29,7 +29,7 @@ export interface BookAnalysisState {
 
   // 任务管理
   startTask: (projectPath: string, config: BookAnalysisConfig, abortController?: AbortController) => string
-  updateTaskBookData: (taskId: string, bookId: string, chapters: BookAnalysisChapterSummary[]) => void
+  updateTaskBookData: (taskId: string, bookId: string, chapters: BookAnalysisChapterSummary[], bookPath?: string) => void
   updateTaskProgress: (taskId: string, progress: Partial<BookAnalysisProgress>) => void
   updateTaskMetadata: (taskId: string, metadata: BookAnalysisMetadata) => void
   updateTaskCharacters: (taskId: string, characters: ExtractedCharacter[]) => void
@@ -54,6 +54,11 @@ export interface BookAnalysisState {
   // 侧栏刷新触发器（导入/删除作品后递增，侧栏监听此值自动刷新）
   sidebarRefreshCounter: number
   triggerSidebarRefresh: () => void
+
+  // 角色识别完成待处理：记录后台识别完成的 taskId，主面板据此恢复"角色选择"面板
+  pendingRecognitionTaskId: string | null
+  requestReopenChapterSelection: (taskId: string) => void
+  consumeReopenRequest: () => string | null
 
   // 角色识别 actions（feature/character-recognition-and-simple-mode）
   setRecognitionStatus: (status: "idle" | "heuristic" | "llm_scoring" | "llm_recognizing" | "done" | "error") => void
@@ -86,6 +91,9 @@ export const useBookAnalysisStore = create<BookAnalysisState>((set, get) => ({
   recognizedCharacters: [],
   selectedCharacterIds: [],
   recognitionError: undefined,
+
+  // 角色识别完成待处理
+  pendingRecognitionTaskId: null,
 
   startTask: (projectPath: string, config: BookAnalysisConfig, abortController?: AbortController) => {
     const now = Date.now()
@@ -124,11 +132,11 @@ export const useBookAnalysisStore = create<BookAnalysisState>((set, get) => ({
     return taskId
   },
 
-  updateTaskBookData: (taskId: string, bookId: string, chapters: BookAnalysisChapterSummary[]) => {
+  updateTaskBookData: (taskId: string, bookId: string, chapters: BookAnalysisChapterSummary[], bookPath?: string) => {
     set((state) => ({
       tasks: state.tasks.map((task) =>
         task.id === taskId
-          ? { ...task, bookId, chapters, updatedAt: Date.now() }
+          ? { ...task, bookId, chapters, ...(bookPath ? { bookPath } : {}), updatedAt: Date.now() }
           : task
       ),
     }))
@@ -291,6 +299,16 @@ export const useBookAnalysisStore = create<BookAnalysisState>((set, get) => ({
 
   triggerSidebarRefresh: () => {
     set((state) => ({ sidebarRefreshCounter: state.sidebarRefreshCounter + 1 }))
+  },
+
+  // 角色识别完成待处理
+  requestReopenChapterSelection: (taskId: string) => {
+    set({ pendingRecognitionTaskId: taskId })
+  },
+  consumeReopenRequest: () => {
+    const id = get().pendingRecognitionTaskId
+    set({ pendingRecognitionTaskId: null })
+    return id
   },
 
   // 角色识别 actions 实现（feature/character-recognition-and-simple-mode）

@@ -107,10 +107,19 @@ export function useCharacterRecognition({
         recognitionStatus: "done",
         recognizedCharactersCount: recognized.length,
         stageLabel: `识别出 ${recognized.length} 个角色（AI 识别）`,
+        percentage: 100,
+        completed: recognized.length,
+        total: recognized.length,
       })
       await saveRecognizedCharacters(bookPath, recognized)
       setRecognizedCharacters(recognized)
       setRecognitionStatus("done")
+      toast.success(`识别完成：共 ${recognized.length} 个角色`, {
+        label: "现在处理",
+        onClick: () => {
+          useBookAnalysisStore.getState().requestReopenChapterSelection(taskId)
+        },
+      })
     } catch (err) {
       if (abortController.signal.aborted) return
       const rawMessage = err instanceof Error ? err.message : "识别失败"

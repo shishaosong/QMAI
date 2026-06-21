@@ -185,6 +185,9 @@ export interface BookAnalysisTask {
   id: string
   projectPath: string
   bookId: string
+  /** 拆书作品目录绝对路径（projectPath/book-analysis/bookId）。
+   *  仅在拆书完成后由 updateTaskBookData 写入；用于"现在处理"重建章节选择面板。 */
+  bookPath?: string
   config: BookAnalysisConfig
   metadata?: BookAnalysisMetadata
   progress: BookAnalysisProgress

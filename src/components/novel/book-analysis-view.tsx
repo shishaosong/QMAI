@@ -63,6 +63,7 @@ export function BookAnalysisView() {
   const currentProject = useWikiStore((s) => s.project)
   const storeSelectedBookId = useBookAnalysisStore((s) => s.selectedLibraryBookId)
   const sidebarRefreshCounter = useBookAnalysisStore((s) => s.sidebarRefreshCounter)
+  const pendingRecognitionTaskId = useBookAnalysisStore((s) => s.pendingRecognitionTaskId)
   const startTask = useBookAnalysisStore((s) => s.startTask)
   const cancelTask = useBookAnalysisStore((s) => s.cancelTask)
   const tasks = useBookAnalysisStore((s) => s.tasks)
@@ -165,6 +166,32 @@ export function BookAnalysisView() {
     }
   }, [storeSelectedBookId, selectedBookId, libraryState.books])
 
+  // 监听"现在处理"请求：从 task 重建章节选择面板（feature/fix-recognition-reopen）
+  // 触发点：toast「现在处理」按钮 / 侧边栏「现在处理」按钮，均调用 requestReopenChapterSelection
+  useEffect(() => {
+    if (!pendingRecognitionTaskId) return
+    // 面板已打开则不重复打开
+    if (chapterSelectionData) {
+      useBookAnalysisStore.getState().consumeReopenRequest()
+      return
+    }
+    const task = tasks.find((t) => t.id === pendingRecognitionTaskId)
+    useBookAnalysisStore.getState().consumeReopenRequest()
+    if (!task || !task.bookPath || !task.metadata || !task.chapters || task.chapters.length === 0) {
+      console.warn("[现在处理] 任务数据不完整，无法恢复面板", task?.id)
+      return
+    }
+    setChapterSelectionData({
+      taskId: task.id,
+      bookPath: task.bookPath,
+      chapters: task.chapters,
+      metadata: task.metadata,
+      abortController: task.abortController ?? new AbortController(),
+      selectedChapterIds: [],
+      depth: "standard" as AnalysisDepth,
+    })
+  }, [pendingRecognitionTaskId, tasks, chapterSelectionData, setChapterSelectionData])
+
   const handleStartAnalysis = async (config: {
     sourceType: "file"
     sourcePath: string
@@ -217,7 +244,7 @@ export function BookAnalysisView() {
       if (splitResult.success) {
         updateTaskMetadata(taskId, splitResult.metadata)
 
-        useBookAnalysisStore.getState().updateTaskBookData(taskId, splitResult.bookId, splitResult.chapters)
+        useBookAnalysisStore.getState().updateTaskBookData(taskId, splitResult.bookId, splitResult.chapters, splitResult.bookPath)
 
         useBookAnalysisStore.getState().triggerSidebarRefresh()
 
@@ -322,6 +349,7 @@ export function BookAnalysisView() {
         const book = libraryState.books.find((item) => item.id === bookId)
         setSelectedBookId(bookId)
         setSelectedCharacterId(null)
+        clearRecognition()
         if (book) useBookAnalysisStore.getState().setCurrentResult(toBookAnalysisResult(book))
       }}
       onSelectCharacter={setSelectedCharacterId}
