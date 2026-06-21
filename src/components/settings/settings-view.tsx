@@ -504,16 +504,22 @@ export function SettingsView() {
       {/* Sidebar — category nav. Matches the IconSidebar's pill-on-accent
           pattern so the two navigational surfaces feel like one app. */}
       <aside className="flex w-56 shrink-0 flex-col border-r bg-muted/30">
-        <div className="flex items-center gap-1.5 px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t("settings.title")}
-          <button
-            type="button"
-            className="inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-primary"
+        <div className="flex items-center gap-1.5 px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider">
+          <span
+            role="button"
+            tabIndex={0}
+            className="cursor-pointer text-muted-foreground transition-colors hover:text-primary"
             title="软件设置功能使用说明"
             onClick={() => void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/H8F7wRVqeifGDakS7jXcSkO4nlg?from=from_copylink")}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/H8F7wRVqeifGDakS7jXcSkO4nlg?from=from_copylink")
+              }
+            }}
           >
-            <CircleHelp className="h-3.5 w-3.5" />
-          </button>
+            {t("settings.title")}
+          </span>
+          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-3">
           {CATEGORIES.map((c) => {

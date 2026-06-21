@@ -82,20 +82,27 @@ export function SoulSidebarPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <div className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="h-4 w-4 text-primary" />
-          {t("nav.soul")}
-          <button
-            type="button"
-            className="inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-primary"
+          <span
+            role="button"
+            tabIndex={0}
+            className="cursor-pointer text-foreground transition-colors hover:text-primary"
             title="灵魂功能使用说明"
             onClick={(e) => {
               e.stopPropagation()
               void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/Az3owqt2kiDxBbkls0Gc3K7ZnNc?from=from_copylink")
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation()
+                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/Az3owqt2kiDxBbkls0Gc3K7ZnNc?from=from_copylink")
+              }
+            }}
           >
-            <CircleHelp className="h-3.5 w-3.5" />
-          </button>
+            {t("nav.soul")}
+          </span>
+          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
       </div>
 

@@ -36,19 +36,26 @@ export function GraphSidebarPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
-        <div className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-          {t("novel.graph.title")}
-          <button
-            type="button"
-            className="inline-flex items-center justify-center text-muted-foreground transition-colors hover:text-primary"
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
+          <span
+            role="button"
+            tabIndex={0}
+            className="cursor-pointer text-foreground transition-colors hover:text-primary"
             title="小说图谱功能使用说明"
             onClick={(e) => {
               e.stopPropagation()
               void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/Yrb6wfFzqiFy8akW4xAcTz3EnKh?from=from_copylink")
             }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation()
+                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/Yrb6wfFzqiFy8akW4xAcTz3EnKh?from=from_copylink")
+              }
+            }}
           >
-            <CircleHelp className="h-3.5 w-3.5" />
-          </button>
+            {t("novel.graph.title")}
+          </span>
+          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
         <Button
           type="button"
