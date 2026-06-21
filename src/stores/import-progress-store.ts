@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { normalizePath } from "@/lib/path-utils"
 
-export type ImportProgressKind = "chapter" | "outline"
+export type ImportProgressKind = "chapter" | "outline" | "outline_generation" | "outline_refinement"
 export type ImportProgressStatus = "running" | "done" | "cancelled" | "error"
 
 export interface ImportProgressTask {
@@ -17,6 +17,7 @@ export interface ImportProgressTask {
   cancelling: boolean
   createdAt: number
   updatedAt: number
+  abortController?: AbortController
 }
 
 interface StartImportProgressTaskInput {
@@ -25,6 +26,7 @@ interface StartImportProgressTaskInput {
   total: number
   currentTitle?: string
   message?: string
+  abortController?: AbortController
 }
 
 export interface ImportProgressState {
@@ -37,6 +39,7 @@ export interface ImportProgressState {
     patch?: Partial<ImportProgressTask>,
   ) => void
   markCancelling: (taskId: string) => void
+  cancelTask: (taskId: string) => void
   clearTask: (taskId: string) => void
   getLatestTask: (projectPath: string, kind?: ImportProgressKind) => ImportProgressTask | null
 }
@@ -62,6 +65,7 @@ export const useImportProgressStore = create<ImportProgressState>((set, get) => 
           cancelling: false,
           createdAt: now,
           updatedAt: now,
+          abortController: input.abortController,
         },
         ...state.tasks,
       ],
@@ -82,6 +86,15 @@ export const useImportProgressStore = create<ImportProgressState>((set, get) => 
   },
   markCancelling: (taskId) => {
     get().updateTask(taskId, { cancelling: true })
+  },
+  cancelTask: (taskId) => {
+    const task = get().tasks.find((t) => t.id === taskId)
+    if (!task) return
+    task.abortController?.abort()
+    get().updateTask(taskId, { status: "cancelled", cancelling: false })
+    setTimeout(() => {
+      get().clearTask(taskId)
+    }, 3000)
   },
   clearTask: (taskId) => {
     set((state) => ({ tasks: state.tasks.filter((task) => task.id !== taskId) }))

@@ -9,6 +9,13 @@ import { createRoot } from "react-dom/client"
 import { describe, it, expect, vi, beforeEach } from "vitest"
 
 const mockSetSelectedLibraryBookId = vi.fn()
+const mockBookAnalysisState = {
+  setSelectedLibraryBookId: mockSetSelectedLibraryBookId,
+  sidebarRefreshCounter: 0,
+  triggerSidebarRefresh: vi.fn(),
+  tasks: [],
+  cancelTask: vi.fn(),
+}
 
 // === mocks 必须在 import 之前 ===
 vi.mock("@/commands/fs", () => ({
@@ -35,9 +42,7 @@ vi.mock("@/stores/wiki-store", () => ({
 
 vi.mock("@/stores/book-analysis-store", () => ({
   useBookAnalysisStore: (selector?: (state: any) => unknown) =>
-    selector
-      ? selector({ setSelectedLibraryBookId: mockSetSelectedLibraryBookId })
-      : { setSelectedLibraryBookId: mockSetSelectedLibraryBookId },
+    selector ? selector(mockBookAnalysisState) : mockBookAnalysisState,
 }))
 
 import { BookAnalysisSidebarPanel } from "./book-analysis-sidebar-panel"
@@ -68,6 +73,7 @@ function renderPanel(): { cleanup: () => void } {
 
 beforeEach(async () => {
   vi.clearAllMocks()
+  mockBookAnalysisState.tasks = []
   await flushAsync(20)
 })
 

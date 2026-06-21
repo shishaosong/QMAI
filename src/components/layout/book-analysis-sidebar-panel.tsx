@@ -7,7 +7,7 @@ import { useEffect, useState } from "react"
 import { useWikiStore } from "@/stores/wiki-store"
 import { useBookAnalysisStore } from "@/stores/book-analysis-store"
 import { Button } from "@/components/ui/button"
-import { BookOpen, Trash2, RefreshCw, Loader2 } from "lucide-react"
+import { BookOpen, Trash2, RefreshCw, Loader2, Square } from "lucide-react"
 import { listDirectory, readFile, deleteFile } from "@/commands/fs"
 import { joinPath, normalizePath } from "@/lib/path-utils"
 import { toast } from "@/lib/toast"
@@ -34,6 +34,7 @@ export function BookAnalysisSidebarPanel() {
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const { setSelectedLibraryBookId, sidebarRefreshCounter, triggerSidebarRefresh } = useBookAnalysisStore()
   const tasks = useBookAnalysisStore((s) => s.tasks)
+  const cancelTask = useBookAnalysisStore((s) => s.cancelTask)
   const [books, setBooks] = useState<BookItem[]>([])
   const [loading, setLoading] = useState(false)
   const [selectedBookId, setSelectedBookId] = useState<string | null>(null)
@@ -283,6 +284,15 @@ export function BookAnalysisSidebarPanel() {
                   <Loader2 className="h-3 w-3 animate-spin text-primary" />
                   <span className="font-medium text-foreground truncate">{stageLabel}</span>
                   <span className="ml-auto text-muted-foreground shrink-0">{percentage}%</span>
+                  <button
+                    type="button"
+                    onClick={() => cancelTask(task.id)}
+                    className="flex items-center gap-1 rounded-md bg-destructive/10 px-1.5 py-0.5 text-[10px] font-medium text-destructive hover:bg-destructive/20 transition-colors"
+                    title="立即停止提取"
+                  >
+                    <Square className="h-2.5 w-2.5" />
+                    停止
+                  </button>
                 </div>
                 <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
                   <div

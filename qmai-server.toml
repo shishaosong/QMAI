@@ -1,7 +1,0 @@
-[server]
-host = "127.0.0.1"
-port = 5800
-
-[app]
-project_path = ""
-open_browser = true

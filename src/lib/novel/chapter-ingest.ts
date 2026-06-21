@@ -3,7 +3,7 @@ import { normalizePath } from "@/lib/path-utils"
 import { useWikiStore } from "@/stores/wiki-store"
 import { parseFrontmatter } from "@/lib/frontmatter"
 import { isChapterPage, isFinalChapter, parseChapterNumber } from "./chapter-meta"
-import { DEFAULT_LLM_REQUEST_TIMEOUT_MS, streamChat, type StreamCallbacks } from "@/lib/llm-client"
+import { streamChat, type StreamCallbacks } from "@/lib/llm-client"
 import type { ChatMessage } from "@/lib/llm-providers"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
 import type { LlmConfig } from "@/stores/wiki-store"
@@ -286,7 +286,7 @@ function materializeRestoredCurrentSnapshot(
   })
 }
 
-export type IngestFailReason = "no_llm" | "not_chapter" | "not_final" | "invalid_chapter_number" | "extract_failed"
+export type IngestFailReason = "no_llm" | "not_chapter" | "not_final" | "invalid_chapter_number" | "extract_failed" | "cancelled"
 
 export interface IngestResult {
   snapshot: ChapterSnapshot | null
@@ -297,6 +297,7 @@ export async function ingestChapter(
   projectPath: string,
   chapterPath: string,
   _reviewModel?: string,
+  signal?: AbortSignal,
 ): Promise<IngestResult> {
   const pp = normalizePath(projectPath)
   const novelMode = useWikiStore.getState().novelMode
@@ -324,7 +325,8 @@ export async function ingestChapter(
   }
   const body = parsed.body
 
-  const extractedSnapshot = await extractSnapshotWithLLM(chapterNumber, body, runtimeLlmConfig)
+  if (signal?.aborted) return { snapshot: null, failReason: "cancelled" }
+  const extractedSnapshot = await extractSnapshotWithLLM(chapterNumber, body, runtimeLlmConfig, signal)
   const snapshot = extractedSnapshot ? canonicalizeSnapshotCharacters(extractedSnapshot) : null
 
   if (!snapshot) {
@@ -539,6 +541,7 @@ async function extractSnapshotWithLLM(
   chapterNumber: number,
   chapterBody: string,
   llmConfig: LlmConfig,
+  signal?: AbortSignal,
 ): Promise<ChapterSnapshot | null> {
   const outputLang = getOutputLanguage()
   const langReminder = buildLanguageReminder(outputLang)
@@ -640,7 +643,7 @@ ${chapterBody.slice(0, 8000)}
       },
     }
 
-    await streamChat(llmConfig, messages, callbacks, AbortSignal.timeout(DEFAULT_LLM_REQUEST_TIMEOUT_MS))
+    await streamChat(llmConfig, messages, callbacks, signal)
     if (streamError) throw streamError
 
     const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.match(/\{[\s\S]*\}/) ?? result.match(/\{[\s\S]*\}/)
@@ -1390,6 +1393,7 @@ export async function deleteChapterSnapshots(projectPath: string, chapterNumber:
 export async function ingestOutline(
   projectPath: string,
   outlinePath: string,
+  signal?: AbortSignal,
 ): Promise<ChapterSnapshot | null> {
   const pp = normalizePath(projectPath)
   const llmConfig = useWikiStore.getState().llmConfig
@@ -1460,7 +1464,7 @@ ${body}
       onError: (error: Error) => { streamError = error },
     }
 
-    await streamChat(runtimeLlmConfig, messages, callbacks, AbortSignal.timeout(DEFAULT_LLM_REQUEST_TIMEOUT_MS))
+    await streamChat(runtimeLlmConfig, messages, callbacks, signal)
     if (streamError) throw streamError
 
     const jsonMatch = result.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1]?.match(/\{[\s\S]*\}/) ?? result.match(/\{[\s\S]*\}/)

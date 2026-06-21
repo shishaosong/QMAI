@@ -851,59 +851,76 @@ export function ChatPanel() {
           } catch {}
         }
 
+        // 固定前缀：技能、角色定位、章节输出规则、规则、Markdown 格式要求。
+        // 这部分在一次会话/配置下稳定，打 cacheControl 让 Anthropic 跨会话命中
+        // prompt cache；OpenAI/Google 等其他 provider 会自动折叠成字符串，不受影响。
+        const stablePrefixParts = [
+          qmQuaiSystemPrompt ? `## QM-QUAI 技能\n${qmQuaiSystemPrompt}` : "",
+          novelMode
+            ? "你是一个专业的小说写作助手。请根据提供的小说上下文包和章节内容，协助用户进行小说创作。"
+            : "你是一个专业的资料库问答助手。请基于下方提供的资料内容回答问题。",
+          "",
+          novelMode
+            ? [
+                "## 小说章节输出规则",
+                "- 如果用户要求生成、续写或改写章节，只输出可直接放入章节库的小说正文。",
+                "- 不要输出资料说明、创作说明、免责声明、后续建议、引用列表或隐藏 cited 注释。",
+                "- 不要在小说正文里写 [[资料名]]、[1]、[2] 这类资料引用标记。",
+                "- 资料只作为内部参考，不能把资料库缺失、基于现有资料等元信息写进章节。",
+              ].join("\n")
+            : "",
+          "",
+          novelMode
+            ? [
+                "## 规则",
+                "- 只能基于下方小说资料、上下文包和用户要求创作，不要编写解释性回答。",
+                "- 如果资料不足，也要根据已有小说上下文自然续写，不要把“资料不足”写进正文。",
+              ].join("\n")
+            : [
+                "## 规则",
+                "- 只能基于下方编号资料页面回答。",
+                "- 如果资料不足，请直接说明资料不足。",
+                "- 引用资料页面时使用 [[页面名]] 格式。",
+                "- 引用具体信息时使用页码标记，例如 [1]、[2]。",
+                "- 回复末尾必须添加隐藏注释，列出你使用过的资料页码：",
+                "  <!-- cited: 1, 3, 5 -->",
+              ].join("\n"),
+          "",
+          "请使用清晰的 Markdown 格式。",
+        ].filter(Boolean)
+
+        // 动态部分：资料库目标、索引、页面、上下文包、语言规则。
+        // 每次检索结果不同，不缓存。
+        const dynamicParts = [
+          purpose ? `## 资料库目标\n${purpose}` : "",
+          index ? `## 资料库索引\n${index}` : "",
+          relevantPages.length > 0 ? `## 页面列表\n${pageList}` : "",
+          `## 资料页面\n\n${pagesContext}`,
+          novelContextPreamble ? `\n${novelContextPreamble}` : "",
+          dismantlingDirective ? `\n${dismantlingDirective}` : "",
+          "",
+          "---",
+          "",
+          `## ⚠️ 强制输出语言：${outLang}`,
+          "",
+          `你的整段回复必须使用 **${outLang}**。`,
+          "即使上方资料内容使用其他语言，也不能影响你的回复语言。",
+          `请忽略资料原文语言，只使用 ${outLang} 回复。`,
+          `必要时，专有名词也应使用 ${outLang} 的常见译法或音译。`,
+          "不要使用任何其他语言。本规则优先于其他所有指令。",
+        ].filter(Boolean)
+
+        const systemBlocks: { type: "text"; text: string; cacheControl?: boolean }[] = []
+        if (stablePrefixParts.length > 0) {
+          systemBlocks.push({ type: "text", text: stablePrefixParts.join("\n"), cacheControl: true })
+        }
+        if (dynamicParts.length > 0) {
+          systemBlocks.push({ type: "text", text: dynamicParts.join("\n") })
+        }
+
         systemMessages.push({
           role: "system",
-          content: [
-            qmQuaiSystemPrompt ? `## QM-QUAI 技能\n${qmQuaiSystemPrompt}` : "",
-            novelMode
-              ? "你是一个专业的小说写作助手。请根据提供的小说上下文包和章节内容，协助用户进行小说创作。"
-              : "你是一个专业的资料库问答助手。请基于下方提供的资料内容回答问题。",
-            "",
-            novelMode
-              ? [
-                  "## 小说章节输出规则",
-                  "- 如果用户要求生成、续写或改写章节，只输出可直接放入章节库的小说正文。",
-                  "- 不要输出资料说明、创作说明、免责声明、后续建议、引用列表或隐藏 cited 注释。",
-                  "- 不要在小说正文里写 [[资料名]]、[1]、[2] 这类资料引用标记。",
-                  "- 资料只作为内部参考，不能把资料库缺失、基于现有资料等元信息写进章节。",
-                ].join("\n")
-              : "",
-            "",
-            novelMode
-              ? [
-                  "## 规则",
-                  "- 只能基于下方小说资料、上下文包和用户要求创作，不要编写解释性回答。",
-                  "- 如果资料不足，也要根据已有小说上下文自然续写，不要把“资料不足”写进正文。",
-                ].join("\n")
-              : [
-                  "## 规则",
-                  "- 只能基于下方编号资料页面回答。",
-                  "- 如果资料不足，请直接说明资料不足。",
-                  "- 引用资料页面时使用 [[页面名]] 格式。",
-                  "- 引用具体信息时使用页码标记，例如 [1]、[2]。",
-                  "- 回复末尾必须添加隐藏注释，列出你使用过的资料页码：",
-                  "  <!-- cited: 1, 3, 5 -->",
-                ].join("\n"),
-            "",
-            "请使用清晰的 Markdown 格式。",
-            "",
-            purpose ? `## 资料库目标\n${purpose}` : "",
-            index ? `## 资料库索引\n${index}` : "",
-            relevantPages.length > 0 ? `## 页面列表\n${pageList}` : "",
-            `## 资料页面\n\n${pagesContext}`,
-            novelContextPreamble ? `\n${novelContextPreamble}` : "",
-            dismantlingDirective ? `\n${dismantlingDirective}` : "",
-            "",
-            "---",
-            "",
-            `## ⚠️ 强制输出语言：${outLang}`,
-            "",
-            `你的整段回复必须使用 **${outLang}**。`,
-            "即使上方资料内容使用其他语言，也不能影响你的回复语言。",
-            `请忽略资料原文语言，只使用 ${outLang} 回复。`,
-            `必要时，专有名词也应使用 ${outLang} 的常见译法或音译。`,
-            "不要使用任何其他语言。本规则优先于其他所有指令。",
-          ].filter(Boolean).join("\n"),
+          content: systemBlocks,
         })
 
         // Reminder injected later, right before the user's current message
@@ -915,14 +932,20 @@ export function ChatPanel() {
           const { detectEditIntent, buildAgentSystemSuffix } = await import("@/lib/novel/agent-parser")
           if (detectEditIntent(text)) {
             const lastSys = systemMessages[systemMessages.length - 1]
-            if (lastSys && typeof lastSys.content === "string") {
+            if (lastSys) {
               const { readScopeFileContents } = await import("@/lib/novel/agent-tools")
               const filesWithContent = await readScopeFileContents(pp, "chapters")
               const fileContentStr = filesWithContent.length > 0
                 ? `\n\n## 当前章节文件内容（供修改定位）\n${filesWithContent.map(f => `### ${f.name}\n\`\`\`\n${f.content}\n\`\`\``).join("\n\n")}`
                 : "\n\n## 当前章节文件列表\n(暂无章节文件)"
-              lastSys.content += buildAgentSystemSuffix("chapters")
-              lastSys.content += fileContentStr
+              const suffix = buildAgentSystemSuffix("chapters") + fileContentStr
+              if (typeof lastSys.content === "string") {
+                lastSys.content += suffix
+              } else if (Array.isArray(lastSys.content)) {
+                // content 为 ContentBlock[] 时，追加为新的 text block（不缓存，
+                // 因为文件内容动态），避免破坏前面的 cacheControl 断点。
+                lastSys.content.push({ type: "text", text: suffix })
+              }
             }
           }
         }

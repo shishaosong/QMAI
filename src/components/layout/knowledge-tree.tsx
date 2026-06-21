@@ -1262,7 +1262,11 @@ export function RawSourcesSection({ onCancelExtraction }: { onCancelExtraction?:
         <div className="ml-3 space-y-2 pr-1 text-xs text-muted-foreground">
           {hasAnyTask ? (
             projectTasks.slice(0, 20).map((task) => {
-              const kindLabel = task.kind === "outline" ? "AI 大纲" : "章节"
+              const kindLabel =
+              task.kind === "outline" ? "AI 大纲" :
+                task.kind === "outline_generation" ? "生成大纲" :
+                  task.kind === "outline_refinement" ? "细化生成" :
+                    "章节"
               const progressPercent = task.total > 0
                 ? Math.round((task.completed / task.total) * 100)
                 : 0
@@ -1303,7 +1307,10 @@ export function RawSourcesSection({ onCancelExtraction }: { onCancelExtraction?:
                             size="sm"
                             variant="outline"
                             className="h-5 px-1.5 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                            onClick={onCancelExtraction}
+                            onClick={() => {
+                              useImportProgressStore.getState().cancelTask(task.id)
+                              onCancelExtraction?.()
+                            }}
                             disabled={task.cancelling}
                           >
                             停止
