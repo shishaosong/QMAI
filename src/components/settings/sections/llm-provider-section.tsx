@@ -152,7 +152,7 @@ function PresetRow({
 }: PresetRowProps) {
   const { t } = useTranslation()
   const ov = override ?? {}
-  const model = ov.model ?? preset.defaultModel ?? ""
+  const model = ov.model?.trim() || preset.defaultModel || ""
   const apiKey = ov.apiKey ?? ""
   const apiMode = ov.apiMode ?? preset.apiMode ?? "chat_completions"
   const baseUrl = ov.baseUrl ?? preset.baseUrl ?? ""

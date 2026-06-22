@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
-import { ClipboardCheck, Sparkles, Users } from "lucide-react"
+import { ClipboardCheck, Sparkles, Users, CircleHelp } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { listDirectory, readFile } from "@/commands/fs"
 import { flattenMdFiles } from "@/lib/novel/chapter-utils"
 import { parseFrontmatter } from "@/lib/frontmatter"
+import { openExternalUrl } from "@/lib/open-external-url"
 import { SIX_REVIEW_DIMENSIONS, SIX_REVIEW_DIMENSION_ORDER } from "@/lib/novel/dimension-review-adapter"
 
 const SIX_DIMENSIONS = SIX_REVIEW_DIMENSION_ORDER.map((key) => ({
@@ -99,9 +100,27 @@ export function ReviewCenterSidebarPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center border-b px-3 py-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <div className="flex items-center gap-2 text-sm font-semibold">
           <ClipboardCheck className="h-4 w-4 text-primary" />
-          {t("reviewCenter.title")}
+          <span
+            role="button"
+            tabIndex={0}
+            className="cursor-pointer text-foreground transition-colors hover:text-primary"
+            title="审查中心功能使用说明"
+            onClick={(e) => {
+              e.stopPropagation()
+              void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/J6zCwjcWDiMAdkkOrjgcHtPjngh?from=from_copylink")
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.stopPropagation()
+                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/J6zCwjcWDiMAdkkOrjgcHtPjngh?from=from_copylink")
+              }
+            }}
+          >
+            {t("reviewCenter.title")}
+          </span>
+          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
         </div>
       </div>
 
