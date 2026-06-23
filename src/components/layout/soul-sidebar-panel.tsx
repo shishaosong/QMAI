@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
-import { Sparkles, Plus, CircleHelp } from "lucide-react"
+import { Sparkles, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { openExternalUrl } from "@/lib/open-external-url"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import {
   bindCharacterAura,
   BUILT_IN_CHARACTER_AURAS,
@@ -84,25 +84,7 @@ export function SoulSidebarPanel() {
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="h-4 w-4 text-primary" />
-          <span
-            role="button"
-            tabIndex={0}
-            className="cursor-pointer text-foreground transition-colors hover:text-primary"
-            title="灵魂功能使用说明"
-            onClick={(e) => {
-              e.stopPropagation()
-              void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/QRPwwsXZAi6I4wksRpFca775n6d?from=from_copylink")
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation()
-                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/QRPwwsXZAi6I4wksRpFca775n6d?from=from_copylink")
-              }
-            }}
-          >
-            {t("nav.soul")}
-          </span>
-          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
+          <PanelHeaderWithHelp title={t("nav.soul")} helpKey="soul" />
         </div>
       </div>
 

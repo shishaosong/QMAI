@@ -7,6 +7,13 @@
 export const HELP_LINKS = {
   bookAnalysis:
     "https://tcnk9ik08e1c.feishu.cn/wiki/X50GwYD1QisSF1kXPxCcdej1nth",
+  outline: "https://tcnk9ik08e1c.feishu.cn/wiki/BFtzwwFp8iJNryk7QkrcZNcBnnc",
+  memory: "https://tcnk9ik08e1c.feishu.cn/wiki/UQCTw0EJSiCBVTknapCcUnEln6g",
+  soul: "https://tcnk9ik08e1c.feishu.cn/wiki/QRPwwsXZAi6I4wksRpFca775n6d",
+  settings: "https://tcnk9ik08e1c.feishu.cn/wiki/Z4cjwp0U4iqZ5TkhRiIckmy6nRb",
+  review: "https://tcnk9ik08e1c.feishu.cn/wiki/J6zCwjcWDiMAdkkOrjgcHtPjngh",
+  graph: "https://tcnk9ik08e1c.feishu.cn/wiki/WlOpwrEQYiqczGkSohtcy3U0n7g",
+  chapter: "https://tcnk9ik08e1c.feishu.cn/wiki/TUcKwxtqbihdYvk7bivcaaqGnfd",
 } as const
 
 export type HelpLinkKey = keyof typeof HELP_LINKS

@@ -12,13 +12,12 @@ import {
   MessageCircle,
   HeartHandshake,
   Archive,
-  CircleHelp,
 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import i18n from "@/i18n"
 import { Button } from "@/components/ui/button"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import { useWikiStore } from "@/stores/wiki-store"
-import { openExternalUrl } from "@/lib/open-external-url"
 import { isTauri } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { loadSourceWatchConfig, saveLanguage, loadNovelConfig, loadRerankConfig, normalizeClipServerConfig } from "@/lib/project-store"
@@ -505,21 +504,11 @@ export function SettingsView() {
           pattern so the two navigational surfaces feel like one app. */}
       <aside className="flex w-56 shrink-0 flex-col border-r bg-muted/30">
         <div className="flex items-center gap-1.5 px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider">
-          <span
-            role="button"
-            tabIndex={0}
+          <PanelHeaderWithHelp
+            title={t("settings.title")}
+            helpKey="settings"
             className="cursor-pointer text-muted-foreground transition-colors hover:text-primary"
-            title="软件设置功能使用说明"
-            onClick={() => void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/Z4cjwp0U4iqZ5TkhRiIckmy6nRb?from=from_copylink")}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/Z4cjwp0U4iqZ5TkhRiIckmy6nRb?from=from_copylink")
-              }
-            }}
-          >
-            {t("settings.title")}
-          </span>
-          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
+          />
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-3">
           {CATEGORIES.map((c) => {

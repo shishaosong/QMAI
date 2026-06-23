@@ -40,6 +40,7 @@ import {
 } from "@/lib/novel/dismantling"
 import { flattenMdFiles, getNextChapterNumber } from "@/lib/novel/chapter-utils"
 import { Button } from "@/components/ui/button"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import type { MemoryCenterData, MemoryCenterFilePreview } from "@/lib/novel/memory-center"
 import {
@@ -1244,26 +1245,8 @@ export function SidebarPanel() {
       <div className="flex h-full flex-col">
         <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
           <div className="flex items-center gap-1.5 text-sm font-semibold">
-            <span
-              role="button"
-              tabIndex={0}
-              className="cursor-pointer text-foreground transition-colors hover:text-primary"
-              title="记忆中心功能使用说明"
-              onClick={(e) => {
-                e.stopPropagation()
-                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/SMrtwpJdsi4H5EkP0CicfsOhnvf?from=from_copylink")
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation()
-                  void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/SMrtwpJdsi4H5EkP0CicfsOhnvf?from=from_copylink")
-                }
-              }}
-            >
-              {t("novel.memoryCenter.title")}
-            </span>
-            <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
-          </div>
+          <PanelHeaderWithHelp title={t("novel.memoryCenter.title")} helpKey="memory" />
+        </div>
           <Button
             type="button"
             size="icon"
@@ -1325,29 +1308,11 @@ export function SidebarPanel() {
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
         <div className="min-w-0">
           <div className="flex items-center gap-1.5 text-sm font-semibold">
-            <span
-              role="button"
-              tabIndex={0}
-              className="cursor-pointer text-foreground transition-colors hover:text-primary"
-              title={isChapter ? "章节功能使用说明" : "大纲功能使用说明"}
-              onClick={(e) => {
-                e.stopPropagation()
-                void openExternalUrl(isChapter
-                  ? "https://tcnk9ik08e1c.feishu.cn/wiki/AOkuw8KtCixoVqko4gpc8rYGnNc?from=from_copylink"
-                  : "https://tcnk9ik08e1c.feishu.cn/wiki/CtUhwqUUBiQhOZk6OcHcc4uHnDd?from=from_copylink")
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.stopPropagation()
-                  void openExternalUrl(isChapter
-                    ? "https://tcnk9ik08e1c.feishu.cn/wiki/AOkuw8KtCixoVqko4gpc8rYGnNc?from=from_copylink"
-                    : "https://tcnk9ik08e1c.feishu.cn/wiki/CtUhwqUUBiQhOZk6OcHcc4uHnDd?from=from_copylink")
-                }
-              }}
-            >
-              {isChapter ? t("sidebar.knowledge") : t("sidebar.files")}
-            </span>
-            <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
+            <PanelHeaderWithHelp
+              title={isChapter ? t("sidebar.knowledge") : t("sidebar.files")}
+              helpKey={isChapter ? "chapter" : "outline"}
+              helpTitle={isChapter ? "章节功能使用说明" : "大纲功能使用说明"}
+            />
           </div>
           {isChapter && sidebarTotalWordCount !== null ? (
             <div className="mt-0.5 text-xs text-muted-foreground">

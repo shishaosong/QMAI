@@ -1,9 +1,9 @@
 import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
-import { Filter, SlidersHorizontal, RefreshCw, CircleHelp } from "lucide-react"
+import { Filter, SlidersHorizontal, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { GRAPH_MODE_LABELS, type GraphMode } from "@/lib/graph-mode"
-import { openExternalUrl } from "@/lib/open-external-url"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 
 type ColorMode = "type" | "community"
 type GraphDisplayMode = "graph" | "document" | "mindmap"
@@ -37,25 +37,7 @@ export function GraphSidebarPanel() {
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
         <div className="flex items-center gap-1.5 text-sm font-semibold">
-          <span
-            role="button"
-            tabIndex={0}
-            className="cursor-pointer text-foreground transition-colors hover:text-primary"
-            title="小说图谱功能使用说明"
-            onClick={(e) => {
-              e.stopPropagation()
-              void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/WlOpwrEQYiqczGkSohtcy3U0n7g?from=from_copylink")
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" || e.key === " ") {
-                e.stopPropagation()
-                void openExternalUrl("https://tcnk9ik08e1c.feishu.cn/wiki/WlOpwrEQYiqczGkSohtcy3U0n7g?from=from_copylink")
-              }
-            }}
-          >
-            {t("novel.graph.title")}
-          </span>
-          <CircleHelp className="h-3.5 w-3.5 text-muted-foreground" />
+          <PanelHeaderWithHelp title={t("novel.graph.title")} helpKey="graph" />
         </div>
         <Button
           type="button"
