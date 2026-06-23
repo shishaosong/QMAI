@@ -7,6 +7,77 @@ export interface ChangelogEntry {
   }
 }
 
+const TWO_POINT_TWO_TEN_CHANGELOG: ChangelogEntry = {
+  version: "2.2.10",
+  date: "2026-06-09",
+  highlights: {
+    en: [
+      "Restored the LLM provider model fetch control so fetched models can be selected from a dropdown and the model test uses the selected model.",
+    ],
+    zh: [
+      "恢复大语言/LLM 模型中的拉取模型入口：拉取后可从下拉框选择模型，点击测试模型时会测试当前选中的模型。",
+    ],
+  },
+}
+
+const TWO_POINT_TWO_TWELVE_CHANGELOG: ChangelogEntry = {
+  version: "2.2.12",
+  date: "2026-06-11",
+  highlights: {
+    en: [
+      "Fixed continue-next-chapter regenerating chapter 1: incidental 开篇/第一章 wording inside prompts no longer hijacks the target chapter.",
+      "Continue-next-chapter now remembers the chapter just generated in this conversation, so an empty chapter library no longer resets the target back to chapter 1.",
+      "Fixed AI chapter editing failing with \"missing frontmatter, write-back stopped\": the original chapter frontmatter is reattached automatically, and fenced output or missing headings are tolerated.",
+      "Added a per-chapter target character setting: chapter drafting, expansion thresholds, and the continue-next-chapter prompt all follow the configured target.",
+      "Fixed the review stage being unstoppable when the stop signal fired before the review started.",
+      "Fixed contradictory outline refinement checks by uniformly testing whether the target directory already contains .md files.",
+      "Fixed stage-4 AI review interruptions: timeout extended from 2 to 5 minutes with automatic retries.",
+      "Fixed stale thinking content showing up when creating or switching conversations.",
+      "Redesigned the AI chat footer: deep thinking and normal mode are mutually exclusive, and normal mode supports plain conversation plus chapter editing.",
+    ],
+    zh: [
+      "修复“继续生成下一章”会重复生成第一章的问题：提示词中顺带出现的“开篇/第一章”字样不再把目标章节劫持为第1章。",
+      "继续生成下一章会记住本会话刚生成、尚未保存的章节号，章节库为空时也能正确推进到下一章。",
+      "修复 AI 修改章节时“返回内容缺少 frontmatter，已停止写回”的问题：自动沿用原章节 frontmatter，并容错代码围栏与缺失标题。",
+      "新增“单章目标字数”设置：章节生成、扩写阈值和“继续生成下一章”提示词都按设置目标执行。",
+      "修复点击停止后审稿阶段可能无法停止的问题：停止信号在审稿开始前已生效时也会立即中止。",
+      "修复大纲细化生成逻辑矛盾，统一按目录是否已有 .md 文件判断。",
+      "修复 AI 审稿阶段4易中断问题：超时从 2 分钟延长到 5 分钟，并增加失败自动重试。",
+      "修复新建/切换会话时显示旧思考内容的问题。",
+      "AI 会话界面重做：深度思考与普通模式互斥切换，普通模式支持正常对话与编辑章节。",
+    ],
+  },
+}
+
+const TWO_POINT_TWO_ELEVEN_CHANGELOG: ChangelogEntry = {
+  version: "2.2.11",
+  date: "2026-06-10",
+  highlights: {
+    en: [
+      "Fixed the AI Chat save-to-chapter-library flow so the first blank chapter keeps the full right-side chapter toolbar after saving.",
+      "Restored frontmatter-dependent chapter actions after AI Chat saving, including Save as Final Chapter and View Memory.",
+      "Synced preview-body updates when AI Chat appends to or overwrites the currently open chapter, preventing the same toolbar-state regression from reappearing.",
+      "Removed the hard 2,200-3,200 character limit from later deep chapter stages, so review, revision, and final de-AI passes no longer stop or rewrite solely because of that range.",
+      "Removed the old full-text hard cutoff warning from AI Chat streaming, so long chapters no longer stop at a fixed limit while duplicate-output detection stays in place.",
+      "Refined the novel de-AI rules to preserve plot movement, character voice, rough dialogue edges, narrative rhythm, and subtext.",
+      "Fixed local Claude Code CLI and Codex CLI mode so subprocesses explicitly inherit local PATH, HOME, USERPROFILE, APPDATA, and HTTP/HTTPS/ALL/NO_PROXY proxy variables.",
+      "Fixed local CLI mode being overridden by preset default models; when no model is entered manually, QMAI now reads the current default model from ~/.claude/settings.json and ~/.codex/config.toml and runs with the local CLI configuration first.",
+      "Added regression coverage for local CLI config reading, empty-model fallback, and CLI spawn arguments so local environment and proxy mode do not regress again.",
+    ],
+    zh: [
+      "修复 AI 会话“保存到章节库”后，首章空白章节的右侧章节工具栏变成不完整工具栏的问题。",
+      "修复保存后缺少“保存为正式章节”“查看记忆”等依赖章节 frontmatter 的按钮问题。",
+      "补齐 AI 会话将内容追加/覆盖到当前已打开章节时的预览正文同步，避免出现同类工具栏状态错乱回归。",
+      "删除 AI 会话深度章节生成后续阶段的 2200-3200 字硬性限制，审稿、返修和最终去 AI 味阶段不再因为字数区间强制重写或中止。",
+      "移除 AI 会话流式输出的旧全文硬截断提示，避免长正文因固定上限直接停止；重复输出检测仍然保留。",
+      "优化小说去AI味规则，强调保留剧情、角色声线、对白毛边、叙事节奏和潜台词。",
+      "修复本地 Claude Code CLI / Codex CLI 无法正确继承本机环境的问题，启动时会显式带上本机 PATH、HOME、USERPROFILE、APPDATA 以及 HTTP/HTTPS/ALL/NO_PROXY 代理变量。",
+      "修复本地 CLI 模式会被软件预设默认模型覆盖的问题；当未手动填写模型时，软件会读取本机 ~/.claude/settings.json 与 ~/.codex/config.toml 中的当前默认模型，并优先按本地 CLI 配置运行。",
+      "补充本地 CLI 配置读取、空模型回退、以及 CLI 启动参数的回归测试，避免后续再次出现“本地环境读不到”或“走不到本地代理模式”的回退。",
+    ],
+  },
+}
+
 const TWO_POINT_TWO_TWENTY_TWO_CHANGELOG: ChangelogEntry = {
   version: "2.2.22",
   date: "2026-06-23",
@@ -201,7 +272,7 @@ const TWO_POINT_TWO_THIRTEEN_CHANGELOG: ChangelogEntry = {
       "Deep Thinking and Normal Mode now mutually exclusive; Normal Mode allows regular chat without deep-thinking flow.",
     ],
     zh: [
-      "新增去AI味Skill自定义系统，在灵魂到项目灵魂中可编辑规则、重置为默认、全局应用到所有去AI味功能。",
+      "新增去AI味Skill自定义系统，在灵魂到项目灵魂中编辑规则、重置为默认、全局应用到所有去AI味功能。",
       "升级去AI味规则，整合Stop Slop、AI Flavor Remover、Writing Humanizer最佳实践，新增50+个禁用词汇、5大核心方法、10项检查清单。",
       "新增阶段0前情分析，深度思考生成章节前强制读取前3章完整正文并进行AI深度分析。",
       "新增阿里百炼DashScope向量模型支持（tongyi-embedding-vision-plus/flash-2026-03-06）。",
@@ -336,7 +407,7 @@ const TWO_POINT_ONE_ZERO_CHANGELOG: ChangelogEntry = {
       "AI 会话与 AI 大纲输入框支持竖向拖拽调整高度。",
       "修复输入框高度上限，最高可扩展到面板实际高度的一半。",
       "新增章节文件与文件夹导入，并自动按章节号排序。",
-      "优化章节文件夹导入，导入前先预扫描可导入章节数量。",
+      "优化章节文件夹导入，导入前先预扫描可章节数量。",
       "新增导入时的记忆提取确认流程，可选择是否提取记忆。",
       "新增导入记忆进度显示，并支持在导入过程中取消。",
       "增强章节文件名匹配，兼容卷、章等更复杂命名格式。",
