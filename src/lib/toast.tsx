@@ -17,17 +17,25 @@ import { CheckCircle2, AlertTriangle, Info, X } from "lucide-react"
 
 export type ToastKind = "success" | "error" | "info"
 
+/** 可选的操作按钮：携带在 toast 上，例如「现在处理」。带 action 的 toast 不会自动消失。 */
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
+
 interface ToastItem {
   id: number
   kind: ToastKind
   message: string
   createdAt: number
+  /** 可选操作按钮；存在时不自动消失。 */
+  action?: ToastAction
 }
 
 interface ToastApi {
-  success: (message: string) => void
-  error: (message: string) => void
-  info: (message: string) => void
+  success: (message: string, action?: ToastAction) => void
+  error: (message: string, action?: ToastAction) => void
+  info: (message: string, action?: ToastAction) => void
 }
 
 const ToastContext = createContext<ToastApi | null>(null)
@@ -49,11 +57,14 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const push = useCallback(
-    (kind: ToastKind, message: string) => {
+    (kind: ToastKind, message: string, action?: ToastAction) => {
       const id = ++idRef.current
-      setItems((current) => [...current, { id, kind, message, createdAt: Date.now() }])
-      const timer = setTimeout(() => dismiss(id), TOAST_DURATION_MS)
-      timersRef.current.set(id, timer)
+      setItems((current) => [...current, { id, kind, message, createdAt: Date.now(), action }])
+      // 带 action 的 toast 不自动消失，必须由用户点击关闭或操作按钮
+      if (!action) {
+        const timer = setTimeout(() => dismiss(id), TOAST_DURATION_MS)
+        timersRef.current.set(id, timer)
+      }
     },
     [dismiss],
   )
@@ -67,9 +78,9 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
   const api = useMemo<ToastApi>(
     () => ({
-      success: (message) => push("success", message),
-      error: (message) => push("error", message),
-      info: (message) => push("info", message),
+      success: (message, action) => push("success", message, action),
+      error: (message, action) => push("error", message, action),
+      info: (message, action) => push("info", message, action),
     }),
     [push],
   )
@@ -101,6 +112,13 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 function ToastCard({ item, onDismiss }: { item: ToastItem; onDismiss: () => void }) {
   const config = KIND_STYLES[item.kind]
   const Icon = config.icon
+  const handleAction = () => {
+    try {
+      item.action?.onClick()
+    } finally {
+      onDismiss()
+    }
+  }
   return (
     <div
       role="status"
@@ -108,6 +126,15 @@ function ToastCard({ item, onDismiss }: { item: ToastItem; onDismiss: () => void
     >
       <Icon className={`mt-0.5 h-4 w-4 shrink-0 ${config.iconClass}`} />
       <div className="flex-1 whitespace-pre-wrap text-sm leading-5 text-foreground">{item.message}</div>
+      {item.action && (
+        <button
+          type="button"
+          onClick={handleAction}
+          className="ml-1 shrink-0 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary hover:bg-primary/20 transition-colors"
+        >
+          {item.action.label}
+        </button>
+      )}
       <button
         type="button"
         onClick={onDismiss}
@@ -163,10 +190,10 @@ export function setToastApi(api: ToastApi | null) {
 }
 
 export const toast: ToastApi = {
-  success: (message) =>
-    externalApi ? externalApi.success(message) : console.info(`[toast:success] ${message}`),
-  error: (message) =>
-    externalApi ? externalApi.error(message) : console.warn(`[toast:error] ${message}`),
-  info: (message) =>
-    externalApi ? externalApi.info(message) : console.info(`[toast:info] ${message}`),
+  success: (message, action) =>
+    externalApi ? externalApi.success(message, action) : console.info(`[toast:success] ${message}`),
+  error: (message, action) =>
+    externalApi ? externalApi.error(message, action) : console.warn(`[toast:error] ${message}`),
+  info: (message, action) =>
+    externalApi ? externalApi.info(message, action) : console.info(`[toast:info] ${message}`),
 }

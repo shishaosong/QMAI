@@ -15,7 +15,7 @@ export function resolveConfig(
 ): LlmConfig {
   const ov = override ?? {}
   const apiKey = ov.apiKey ?? ""
-  const model = ov.model ?? preset.defaultModel ?? ""
+  const model = ov.model?.trim() || preset.defaultModel || ""
   const maxContextSize =
     ov.maxContextSize ?? preset.suggestedContextSize ?? fallback.maxContextSize
   const reasoning = ov.reasoning ?? { mode: "auto" as const }
@@ -75,7 +75,7 @@ export function resolveConfig(
     return {
       provider: preset.provider,
       apiKey: "",
-      model: ov.model ?? "",
+      model: ov.model?.trim() || "",
       ollamaUrl: fallback.ollamaUrl,
       customEndpoint: fallback.customEndpoint,
       maxContextSize,

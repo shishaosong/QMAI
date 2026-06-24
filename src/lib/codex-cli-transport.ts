@@ -8,8 +8,11 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
+import { httpCli } from "@/lib/http-adapter"
+import { isTauri } from "@/lib/platform"
 import { normalizePath } from "@/lib/path-utils"
+import { serverEvents } from "@/lib/server-events"
+import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import type { ChatMessage, ContentBlock, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
 
@@ -65,9 +68,7 @@ export function parseCodexCliLine(rawLine: string): string | null {
       itemType === "assistant_message" ||
       role === "assistant" ||
       (itemType === "message" && !role)
-    if (!item || !isAssistantMessage) {
-      return null
-    }
+    if (!item || !isAssistantMessage) return null
     return textFromCodexContent(item)
   }
 
@@ -178,8 +179,8 @@ export async function streamCodexCli(
   }
 
   const streamId = crypto.randomUUID()
-  let unlistenData: UnlistenFn | undefined
-  let unlistenDone: UnlistenFn | undefined
+  let unlistenData: UnlistenFn | (() => void) | undefined
+  let unlistenDone: UnlistenFn | (() => void) | undefined
   let finished = false
   let aborted = signal?.aborted ?? false
   let lastAgentMessage: string | null = null
@@ -237,40 +238,105 @@ export async function streamCodexCli(
     return reason?.name === "TimeoutError" || /timeout/i.test(String(reason?.message ?? ""))
   }
 
-  const abortListener = () => {
-    aborted = true
-    void invoke("codex_cli_kill", { streamId }).catch(() => {})
+  const finishAbort = () => {
     if (signalTimedOut()) {
       finishWith(() => onError(new Error("Codex CLI request timed out before returning content. Try again, or increase the Codex CLI timeout in Settings.")))
     } else {
       finishWith(onDone)
     }
   }
-  if (aborted) {
-    if (signalTimedOut()) {
-      finishWith(() => onError(new Error("Codex CLI request timed out before returning content. Try again, or increase the Codex CLI timeout in Settings.")))
+
+  const abortListener = () => {
+    aborted = true
+    if (isTauri()) {
+      void invoke("codex_cli_kill", { streamId }).catch(() => {})
     } else {
-      finishWith(onDone)
+      void httpCli.codexKill(streamId).catch(() => {})
     }
+    finishAbort()
+  }
+  if (aborted) {
+    finishAbort()
     return
   }
   signal?.addEventListener("abort", abortListener)
 
   try {
-    unlistenData = await listen<string>(`codex-cli:${streamId}`, (event) => {
-      captureCodexText(event.payload)
-    })
-    if (aborted || finished) {
-      cleanup()
-      return
-    }
+    if (isTauri()) {
+      unlistenData = await listen<string>(`codex-cli:${streamId}`, (event) => {
+        captureCodexText(event.payload)
+      })
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
 
-    unlistenDone = await listen<{ code: number | null; stderr: string; stdout?: string }>(
-      `codex-cli:${streamId}:done`,
-      (event) => {
-        const code = event.payload?.code
-        const stderr = event.payload?.stderr?.trim() ?? ""
-        const stdout = event.payload?.stdout ?? ""
+      unlistenDone = await listen<{ code: number | null; stderr: string; stdout?: string }>(
+        `codex-cli:${streamId}:done`,
+        (event) => {
+          const code = event.payload?.code
+          const stderr = event.payload?.stderr?.trim() ?? ""
+          const stdout = event.payload?.stdout ?? ""
+          if (code !== null && code !== undefined && code !== 0) {
+            const details = stderr || extractCodexCliError(stdout) || extractCodexCliError(unparsedLines.join("\n"))
+            finishWith(() =>
+              onError(new Error(
+                details
+                  ? `Codex CLI exited with code ${code}:\n${details}`
+                  : `Codex CLI exited with code ${code}. Run \`codex\` in a terminal to inspect the problem.`,
+              )),
+            )
+          } else {
+            const finalText = lastAgentMessage ?? parseLastCodexCliAssistantText(stdout)
+            if (finalText) emitCodexText(finalText)
+            if (!emittedText.trim()) {
+              const details = stdout.trim() || unparsedLines.join("\n").trim()
+              finishWith(() =>
+                onError(new Error(
+                  details
+                    ? `Codex CLI completed but did not emit assistant content. Raw output:\n${details}`
+                    : "Codex CLI completed but did not emit assistant content. Run `codex exec --json` in a terminal to inspect the provider output.",
+                )),
+              )
+            } else {
+              finishWith(onDone)
+            }
+          }
+        },
+      )
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
+
+      const payload: SpawnPayload = {
+        streamId,
+        model: config.model,
+        prompt: buildPrompt(messages),
+        isolateLocalConfig: config.localCliIsolation === true,
+        projectPath: currentProjectPath(),
+        timeoutMinutes: config.codexCliTimeoutMinutes,
+      }
+      await invoke("codex_cli_spawn", payload)
+    } else {
+      serverEvents.connect()
+
+      unlistenData = serverEvents.on("codex-cli", (event) => {
+        const payload = event.payload as { streamId: string; data: string }
+        if (payload.streamId !== streamId) return
+        captureCodexText(payload.data)
+      })
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
+
+      unlistenDone = serverEvents.on("codex-cli:done", (event) => {
+        const payload = event.payload as { streamId: string; code: number | null; stderr: string; stdout?: string }
+        if (payload.streamId !== streamId) return
+        const code = payload.code
+        const stderr = payload.stderr?.trim() ?? ""
+        const stdout = payload.stdout ?? ""
         if (code !== null && code !== undefined && code !== 0) {
           const details = stderr || extractCodexCliError(stdout) || extractCodexCliError(unparsedLines.join("\n"))
           finishWith(() =>
@@ -282,9 +348,7 @@ export async function streamCodexCli(
           )
         } else {
           const finalText = lastAgentMessage ?? parseLastCodexCliAssistantText(stdout)
-          if (finalText) {
-            emitCodexText(finalText)
-          }
+          if (finalText) emitCodexText(finalText)
           if (!emittedText.trim()) {
             const details = stdout.trim() || unparsedLines.join("\n").trim()
             finishWith(() =>
@@ -298,30 +362,23 @@ export async function streamCodexCli(
             finishWith(onDone)
           }
         }
-      },
-    )
-    if (aborted || finished) {
-      cleanup()
-      return
+      })
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
+
+      await httpCli.codexSpawn(streamId, config.model, buildPrompt(messages), config.localCliIsolation === true, config.codexCliTimeoutMinutes)
     }
 
-    const payload: SpawnPayload = {
-      streamId,
-      model: config.model,
-      prompt: buildPrompt(messages),
-      isolateLocalConfig: config.localCliIsolation === true,
-      projectPath: currentProjectPath(),
-      timeoutMinutes: config.codexCliTimeoutMinutes,
-    }
-    await invoke("codex_cli_spawn", payload)
     if (aborted || signal?.aborted) {
       aborted = true
-      await invoke("codex_cli_kill", { streamId }).catch(() => {})
-      if (signalTimedOut()) {
-        finishWith(() => onError(new Error("Codex CLI request timed out before returning content. Try again, or increase the Codex CLI timeout in Settings.")))
+      if (isTauri()) {
+        await invoke("codex_cli_kill", { streamId }).catch(() => {})
       } else {
-        finishWith(onDone)
+        await httpCli.codexKill(streamId).catch(() => {})
       }
+      finishAbort()
       return
     }
     await completion

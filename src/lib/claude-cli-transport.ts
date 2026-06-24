@@ -12,24 +12,14 @@
 
 import { invoke } from "@tauri-apps/api/core"
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
+import { httpCli } from "@/lib/http-adapter"
+import { isTauri } from "@/lib/platform"
 import { normalizePath } from "@/lib/path-utils"
+import { serverEvents } from "@/lib/server-events"
+import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import type { ChatMessage, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
 
-/**
- * Public parse entry point. Given one stream-json line from claude's
- * stdout, returns any assistant text it contains (or null for events
- * that carry no user-visible text: session init, tool_use, telemetry, etc.
- * Newer Claude CLI builds may also put the final visible answer in a
- * `result.result` field, so that is treated as a final text fallback.
- *
- * State is carried in a small closure because `assistant` events ship
- * the full in-progress message on every emission (NOT incremental), but
- * `stream_event` passthrough (emitted when --verbose is on) carries
- * real token-level deltas. To avoid double-counting, we prefer deltas
- * when they arrive and skip the fat `assistant` events after seeing one.
- */
 export function createClaudeCodeStreamParser() {
   let emittedText = ""
 
@@ -62,8 +52,6 @@ export function createClaudeCodeStreamParser() {
     const obj = evt as Record<string, unknown>
     const type = obj.type
 
-    // Real streaming deltas (passthrough from Anthropic API when
-    // --verbose is active on newer claude CLI versions).
     if (type === "stream_event") {
       const event = obj.event as Record<string, unknown> | undefined
       if (event?.type === "content_block_delta") {
@@ -76,9 +64,6 @@ export function createClaudeCodeStreamParser() {
       return null
     }
 
-    // Full assistant message (older CLI versions or when deltas are
-    // unavailable). Ship only the portion we haven't already emitted
-    // via stream_event deltas, so streaming still works smoothly.
     if (type === "assistant") {
       const message = obj.message as Record<string, unknown> | undefined
       const content = message?.content
@@ -101,16 +86,10 @@ export function createClaudeCodeStreamParser() {
       return emitNovelText(obj.result)
     }
 
-    // Ignore session init, thinking-token telemetry, tool_use, unknown types.
     return null
   }
 }
 
-// Tauri's `invoke` typing requires the payload object to satisfy
-// `Record<string, unknown>` (an index signature). Plain interfaces
-// don't provide one, so we use a `type` alias with the explicit
-// `&` intersection. Without this, TS rejects the call to invoke()
-// even though the runtime payload is identical.
 type SpawnPayload = Record<string, unknown> & {
   streamId: string
   model: string
@@ -124,11 +103,6 @@ function currentProjectPath(): string | undefined {
   return path ? normalizePath(path) : undefined
 }
 
-/**
- * Subprocess equivalent of the HTTP path in streamChat. Obeys the same
- * StreamCallbacks contract so chat-panel code doesn't need to know
- * which transport it's talking to.
- */
 export async function streamClaudeCodeCli(
   config: LlmConfig,
   messages: ChatMessage[],
@@ -138,11 +112,6 @@ export async function streamClaudeCodeCli(
 ): Promise<void> {
   const { onToken, onDone, onError } = callbacks
 
-  // Sampling knobs aren't wired through the Claude Code CLI (no flag
-  // equivalents for temperature/top_p/max_tokens/stop). Warn loudly in
-  // dev so a caller wiring these up doesn't silently wonder why they
-  // don't take effect; keep quiet in prod so regular users aren't
-  // alarmed by a reasonable default.
   if (import.meta.env?.DEV && overrides) {
     for (const key of ["temperature", "top_p", "top_k", "max_tokens", "stop"] as const) {
       if (overrides[key] !== undefined) {
@@ -155,8 +124,8 @@ export async function streamClaudeCodeCli(
   const streamId = crypto.randomUUID()
   const parse = createClaudeCodeStreamParser()
 
-  let unlistenData: UnlistenFn | undefined
-  let unlistenDone: UnlistenFn | undefined
+  let unlistenData: UnlistenFn | (() => void) | undefined
+  let unlistenDone: UnlistenFn | (() => void) | undefined
   let finished = false
   let aborted = signal?.aborted ?? false
   let emittedToken = false
@@ -165,14 +134,6 @@ export async function streamClaudeCodeCli(
     resolveCompletion = resolve
   })
 
-  // Diagnostic capture for failure paths. The Rust side emits every
-  // stdout line; lines the parser doesn't recognize (non-JSON,
-  // unknown event types, the stream-json `{"type":"error",...}`
-  // shape claude can emit on auth failure) used to be silently
-  // dropped — leaving users staring at a bare "exit code 1" with
-  // nothing to act on. We collect them up to a hard cap so that if
-  // the child exits non-zero AND stderr is empty, we have something
-  // concrete to show in the error message.
   const UNPARSED_BUFFER_CAP = 4096
   const unparsedLines: string[] = []
   let unparsedSize = 0
@@ -199,10 +160,11 @@ export async function streamClaudeCodeCli(
 
   const abortListener = () => {
     aborted = true
-    void invoke("claude_cli_kill", { streamId }).catch(() => {
-      // Kill is best-effort; if the process already exited, the Rust
-      // side returns Ok and the done handler fires normally.
-    })
+    if (isTauri()) {
+      void invoke("claude_cli_kill", { streamId }).catch(() => {})
+    } else {
+      void httpCli.claudeKill(streamId).catch(() => {})
+    }
     finishWith(onDone)
   }
   if (aborted) {
@@ -212,35 +174,84 @@ export async function streamClaudeCodeCli(
   signal?.addEventListener("abort", abortListener)
 
   try {
-    // Listen FIRST so we don't miss the very first event on fast CLIs.
-    unlistenData = await listen<string>(`claude-cli:${streamId}`, (event) => {
-      const token = parse(event.payload)
-      if (token !== null) {
-        emittedToken = true
-        onToken(token)
-      } else {
-        // Parser didn't recognize this line. Stash it in case the
-        // child later exits non-zero with empty stderr — at that
-        // point this captured stdout is the only diagnostic the
-        // user has.
-        captureUnparsed(event.payload)
+    if (isTauri()) {
+      unlistenData = await listen<string>(`claude-cli:${streamId}`, (event) => {
+        const token = parse(event.payload)
+        if (token !== null) {
+          emittedToken = true
+          onToken(token)
+        } else {
+          captureUnparsed(event.payload)
+        }
+      })
+      if (aborted || finished) {
+        cleanup()
+        return
       }
-    })
-    if (aborted || finished) {
-      cleanup()
-      return
-    }
 
-    unlistenDone = await listen<{ code: number | null; stderr: string }>(
-      `claude-cli:${streamId}:done`,
-      (event) => {
-        const code = event.payload?.code
-        const stderr = event.payload?.stderr?.trim() ?? ""
+      unlistenDone = await listen<{ code: number | null; stderr: string }>(
+        `claude-cli:${streamId}:done`,
+        (event) => {
+          const code = event.payload?.code
+          const stderr = event.payload?.stderr?.trim() ?? ""
+          if (code !== null && code !== undefined && code !== 0) {
+            finishWith(() =>
+              onError(new Error(buildExitError(code, stderr, unparsedLines.join("\n")))),
+            )
+          } else if (!emittedToken) {
+            const details = stderr || unparsedLines.join("\n").trim()
+            finishWith(() =>
+              onError(new Error(
+                details
+                  ? `Claude Code CLI completed but returned no content:\n${details}`
+                  : "Claude Code CLI completed but returned no content. Try running `claude -p` in a terminal to inspect the output, or switch to the Anthropic API in Settings.",
+              )),
+            )
+          } else {
+            finishWith(onDone)
+          }
+        },
+      )
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
+
+      const payload: SpawnPayload = {
+        streamId,
+        model: config.model,
+        messages,
+        isolateLocalConfig: config.localCliIsolation === true,
+        projectPath: currentProjectPath(),
+      }
+      await invoke("claude_cli_spawn", payload)
+    } else {
+      serverEvents.connect()
+
+      unlistenData = serverEvents.on("claude-cli", (event) => {
+        const payload = event.payload as { streamId: string; data: string }
+        if (payload.streamId !== streamId) return
+        const token = parse(payload.data)
+        if (token !== null) {
+          emittedToken = true
+          onToken(token)
+        } else {
+          captureUnparsed(payload.data)
+        }
+      })
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
+
+      unlistenDone = serverEvents.on("claude-cli:done", (event) => {
+        const payload = event.payload as { streamId: string; code: number | null; stderr: string }
+        if (payload.streamId !== streamId) return
+        const code = payload.code
+        const stderr = payload.stderr?.trim() ?? ""
         if (code !== null && code !== undefined && code !== 0) {
           finishWith(() =>
-            onError(
-              new Error(buildExitError(code, stderr, unparsedLines.join("\n"))),
-            ),
+            onError(new Error(buildExitError(code, stderr, unparsedLines.join("\n")))),
           )
         } else if (!emittedToken) {
           const details = stderr || unparsedLines.join("\n").trim()
@@ -254,24 +265,22 @@ export async function streamClaudeCodeCli(
         } else {
           finishWith(onDone)
         }
-      },
-    )
-    if (aborted || finished) {
-      cleanup()
-      return
+      })
+      if (aborted || finished) {
+        cleanup()
+        return
+      }
+
+      await httpCli.claudeSpawn(streamId, config.model, messages, config.localCliIsolation === true)
     }
 
-    const payload: SpawnPayload = {
-      streamId,
-      model: config.model,
-      messages,
-      isolateLocalConfig: config.localCliIsolation === true,
-      projectPath: currentProjectPath(),
-    }
-    await invoke("claude_cli_spawn", payload)
     if (aborted || signal?.aborted) {
       aborted = true
-      await invoke("claude_cli_kill", { streamId }).catch(() => {})
+      if (isTauri()) {
+        await invoke("claude_cli_kill", { streamId }).catch(() => {})
+      } else {
+        await httpCli.claudeKill(streamId).catch(() => {})
+      }
       finishWith(onDone)
       return
     }
@@ -279,9 +288,6 @@ export async function streamClaudeCodeCli(
   } catch (err) {
     finishWith(() => {
       const message = err instanceof Error ? err.message : String(err)
-      // Surface the classic "CLI not installed" case as an actionable
-      // message — the Rust side returns a plain string from
-      // spawn-failed, but users need to know to install claude.
       if (/not found|No such file|executable file not found/i.test(message)) {
         onError(new Error(
           "Claude Code CLI not found. Install `claude` (https://www.anthropic.com/claude-code) or pick a different provider.",
@@ -295,29 +301,6 @@ export async function streamClaudeCodeCli(
   }
 }
 
-/**
- * Translate `claude` CLI exit-with-stderr into an actionable error
- * message for the user. The bare "exited with code N: <stderr>"
- * we used to throw was correct but unactionable — users had to
- * read JSON-shaped stderr text to figure out what to do.
- *
- * Three diagnostic sources, used in priority order:
- *   1. stderr — the canonical place. The most common content is
- *      `Unauthenticated:` from Claude Code itself, meaning the
- *      user's ~/.claude OAuth token expired / was revoked / they
- *      logged out. We surface that case explicitly because users
- *      otherwise mis-diagnose it as an LLM Wiki bug.
- *   2. unparsedStdout — stdout lines the parser didn't recognize
- *      (non-JSON, unknown event types, the stream-json `error`
- *      event shape). Used as a fallback when stderr is empty —
- *      claude sometimes writes its real diagnostic to stdout via
- *      the stream-json channel, and our parser silently drops
- *      anything it doesn't classify, leaving users with no info
- *      at all.
- *   3. Neither — silent exit. We can't help much here other than
- *      telling the user to reproduce in a terminal where they can
- *      see whatever output the CLI does produce.
- */
 export function buildExitError(
   code: number,
   stderr: string,
@@ -327,9 +310,9 @@ export function buildExitError(
     return [
       "Claude Code CLI is not authenticated.",
       "Please open a terminal and run `claude` to complete the OAuth login,",
-      "then retry. (LLM Wiki only spawns the binary — it can't run the",
+      "then retry. (LLM Wiki only spawns the binary; it can't run the",
       "login flow on your behalf.)",
-      stderr ? `\n\n— stderr —\n${stderr}` : "",
+      stderr ? `\n\nstderr:\n${stderr}` : "",
     ].join(" ").trim()
   }
   if (stderr) {
@@ -342,14 +325,14 @@ export function buildExitError(
   if (unparsedStdout.trim()) {
     return [
       `claude CLI exited with code ${code} (no stderr).`,
-      "Captured stdout output that LLM Wiki couldn't parse — pasting it",
+      "Captured stdout output that LLM Wiki couldn't parse; pasting it",
       "here so you can see what the CLI actually emitted:\n",
       unparsedStdout.trim(),
     ].join(" ")
   }
   return [
     `claude CLI exited silently with code ${code}.`,
-    "No stdout or stderr was captured — try running `claude -p` in a",
+    "No stdout or stderr was captured; try running `claude -p` in a",
     "terminal with the same prompt to see what's wrong, or switch to",
     "the official Anthropic API in Settings.",
   ].join(" ")

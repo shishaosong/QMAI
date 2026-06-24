@@ -25,7 +25,7 @@ export async function writeFile(path: string, contents: string): Promise<void> {
 
 export async function writeFileAtomic(path: string, contents: string): Promise<void> {
   if (!isTauri()) {
-    return getWebFs().writeFile(path, contents)
+    return getWebFs().writeFileAtomic(path, contents)
   }
   return invoke<void>("write_file_atomic", { path, contents })
 }
@@ -168,7 +168,8 @@ export async function openProjectFolder(path: string): Promise<void> {
 
 export async function openFileLocation(path: string): Promise<void> {
   if (!isTauri()) {
-    return
+    const { httpProject } = await import("@/lib/http-adapter")
+    return httpProject.openFileLocation(path)
   }
   return invoke<void>("open_file_location", { path })
 }

@@ -4,7 +4,21 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { FileText, AlertCircle } from "lucide-react"
-import { open as openDialog } from "@tauri-apps/plugin-dialog"
+import { isTauri } from "@/lib/platform"
+
+function pickFileBrowser(): Promise<File | null> {
+  return new Promise((resolve) => {
+    const input = document.createElement("input")
+    input.type = "file"
+    input.accept = ".txt"
+    input.onchange = () => {
+      const file = input.files?.[0] ?? null
+      resolve(file)
+    }
+    input.oncancel = () => resolve(null)
+    input.click()
+  })
+}
 
 interface BookAnalysisInputDialogProps {
   open: boolean
@@ -25,19 +39,29 @@ export function BookAnalysisInputDialog({
 
   const handleSelectFile = async () => {
     try {
-      const selected = await openDialog({
-        multiple: false,
-        filters: [
-          {
-            name: "文本文件",
-            extensions: ["txt"],
-          },
-        ],
-      })
+      if (isTauri()) {
+        const { open: openDialog } = await import("@tauri-apps/plugin-dialog")
+        const selected = await openDialog({
+          multiple: false,
+          filters: [
+            {
+              name: "文本文件",
+              extensions: ["txt"],
+            },
+          ],
+        })
 
-      if (selected && typeof selected === "string") {
-        setFilePath(selected)
-        setError("")
+        if (selected && typeof selected === "string") {
+          setFilePath(selected)
+          setError("")
+        }
+      } else {
+        // 浏览器模式：使用 <input type="file"> 选择文件
+        const file = await pickFileBrowser()
+        if (file) {
+          setFilePath(file.name)
+          setError("")
+        }
       }
     } catch (err) {
       setError("选择文件失败")

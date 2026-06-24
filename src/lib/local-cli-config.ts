@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { LlmConfig } from "@/stores/wiki-store"
+import { isTauri } from "@/lib/platform"
 
 export interface LocalCliDetectResult {
   installed: boolean
@@ -22,6 +23,9 @@ function detectCommand(provider: LlmConfig["provider"]): "claude_cli_detect" | "
 export async function detectLocalCliConfig(provider: LlmConfig["provider"]): Promise<LocalCliDetectResult | null> {
   const command = detectCommand(provider)
   if (!command) return null
+  if (!isTauri()) {
+    return { installed: false, version: null, path: null, error: "仅桌面端支持本地 CLI 检测" }
+  }
   return invoke<LocalCliDetectResult>(command)
 }
 

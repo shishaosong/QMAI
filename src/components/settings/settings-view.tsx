@@ -16,6 +16,7 @@ import {
 import { useTranslation } from "react-i18next"
 import i18n from "@/i18n"
 import { Button } from "@/components/ui/button"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import { useWikiStore } from "@/stores/wiki-store"
 import { isTauri } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
@@ -502,8 +503,12 @@ export function SettingsView() {
       {/* Sidebar — category nav. Matches the IconSidebar's pill-on-accent
           pattern so the two navigational surfaces feel like one app. */}
       <aside className="flex w-56 shrink-0 flex-col border-r bg-muted/30">
-        <div className="px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-          {t("settings.title")}
+        <div className="flex items-center gap-1.5 px-4 pb-2 pt-4 text-[11px] font-semibold uppercase tracking-wider">
+          <PanelHeaderWithHelp
+            title={t("settings.title")}
+            helpKey="settings"
+            className="cursor-pointer text-muted-foreground transition-colors hover:text-primary"
+          />
         </div>
         <nav className="flex-1 overflow-y-auto px-2 pb-3">
           {CATEGORIES.map((c) => {

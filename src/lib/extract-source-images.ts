@@ -15,6 +15,7 @@
  */
 import { invoke } from "@tauri-apps/api/core"
 import { getFileName, normalizePath } from "@/lib/path-utils"
+import { isTauri } from "@/lib/platform"
 
 /** Mirrors `commands::extract_images::SavedImage` on the Rust side. */
 export interface SavedImage {
@@ -66,6 +67,11 @@ export async function extractAndSaveSourceImages(
   const isPdf = (SUPPORTED_PDF_EXTS as readonly string[]).includes(ext)
   const isOffice = (SUPPORTED_OFFICE_EXTS as readonly string[]).includes(ext)
   if (!isPdf && !isOffice) return []
+
+  if (!isTauri()) {
+    // 浏览器模式不支持本地图片提取（需要 Rust 命令）
+    return []
+  }
 
   const slug = fileName.replace(/\.[^.]+$/, "")
   const destDir = `${pp}/wiki/media/${slug}`

@@ -43,7 +43,7 @@ export function resolveKnownModelConfig(
   return null
 }
 
-function resolveModelConfig(
+export function resolveModelConfig(
   targetModel: string,
   baseConfig: LlmConfig,
   providerConfigs: Record<string, ProviderOverride>,
@@ -65,12 +65,25 @@ function providerIdFromModelRef(modelRef: string): string | null {
   return slashIdx > 0 ? modelRef.trim().slice(0, slashIdx) : null
 }
 
-function sessionModelBelongsToActivePreset(modelRef: string, activePresetId: string | null): boolean {
+function modelBelongsToActivePreset(modelRef: string, activePresetId: string | null): boolean {
   const target = modelRef.trim()
   if (!target) return false
   const providerId = providerIdFromModelRef(target)
   if (!activePresetId) return providerId === null
   return providerId === null || providerId === activePresetId
+}
+
+/**
+ * Resolve the default model for background tasks such as memory and character extraction.
+ * Priority: defaultLlmModel > aiChatModel > baseConfig.
+ */
+export function resolveDefaultModel(baseConfig: LlmConfig): LlmConfig {
+  const { providerConfigs, defaultLlmModel, aiChatModel } = useWikiStore.getState()
+  const targetModel = defaultLlmModel?.trim() || aiChatModel?.trim()
+  if (targetModel) {
+    return resolveModelConfig(targetModel, baseConfig, providerConfigs)
+  }
+  return baseConfig
 }
 
 export function resolveNovelModel(
@@ -86,11 +99,16 @@ export function resolveNovelModel(
     lint: novelConfig.reviewModel,
   }
 
-  const { providerConfigs, aiChatModel, activePresetId } = useWikiStore.getState()
+  const { providerConfigs, defaultLlmModel, aiChatModel, activePresetId } = useWikiStore.getState()
 
   const taskModel = modelMap[taskType]
   if (!taskModel) {
-    if (sessionModelBelongsToActivePreset(aiChatModel, activePresetId)) {
+    const defaultConfig = defaultLlmModel?.trim()
+      ? resolveModelConfig(defaultLlmModel, llmConfig, providerConfigs)
+      : null
+    if (defaultConfig) return defaultConfig
+
+    if (modelBelongsToActivePreset(aiChatModel, activePresetId)) {
       const sessionConfig = resolveKnownModelConfig(aiChatModel, llmConfig, providerConfigs)
       if (sessionConfig) return sessionConfig
     }

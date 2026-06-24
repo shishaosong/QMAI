@@ -7,13 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 const createCustomCharacterAuraFromGeneratedSkill = vi.fn()
 const buildGeneratedAuraInputFromBookCharacterMock = vi.fn()
+const loadCharacterAuraStoreMock = vi.fn()
 
-vi.mock("@/lib/novel/character-aura", async () => {
-  const actual = await vi.importActual<typeof import("@/lib/novel/character-aura")>(
-    "@/lib/novel/character-aura",
-  )
+vi.mock("@/lib/novel/character-aura", () => {
   return {
-    ...actual,
+    loadCharacterAuraStore: (projectPath: string) => loadCharacterAuraStoreMock(projectPath),
     createCustomCharacterAuraFromGeneratedSkill: (projectPath: string, input: unknown) =>
       createCustomCharacterAuraFromGeneratedSkill(projectPath, input),
   }
@@ -110,6 +108,8 @@ describe("importBookAnalysisSkillsAsAuras", () => {
   beforeEach(() => {
     createCustomCharacterAuraFromGeneratedSkill.mockReset()
     buildGeneratedAuraInputFromBookCharacterMock.mockReset()
+    loadCharacterAuraStoreMock.mockReset()
+    loadCharacterAuraStoreMock.mockResolvedValue({ customAuras: [], bindings: [] })
     createCustomCharacterAuraFromGeneratedSkill.mockImplementation(async (_path, input) => ({
       id: "aura-from-mock",
       builtIn: false,

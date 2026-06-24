@@ -4,8 +4,9 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
+import { serverEvents } from "@/lib/server-events"
 import { listDirectory, openProject, fileExists } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId, saveAiChatModel } from "@/lib/project-store"
+import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId, saveAiChatModel } from "@/lib/project-store"
 import { loadNovelProjectMeta } from "@/lib/novel/project-meta"
 import { loadReviewItems, loadChatHistory } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
@@ -21,6 +22,7 @@ import { resetProjectState, resetProjectStores } from "@/lib/reset-project-state
 import { resolveConfig } from "@/components/settings/preset-resolver"
 import { buildProviderModelRef, getLlmPresetById, isKnownProviderModelRef } from "@/components/settings/llm-preset-utils"
 import { loadEnvLlmDefault } from "@/lib/env-llm-defaults"
+import { toast } from "@/lib/toast"
 import type { WikiProject } from "@/types/wiki"
 
 function App() {
@@ -30,12 +32,22 @@ function App() {
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
   const setActiveView = useWikiStore((s) => s.setActiveView)
   const uiFontSizeScale = useWikiStore((s) => s.uiFontSizeScale)
+  const communitySummaryError = useWikiStore((s) => s.communitySummaryError)
+  const setCommunitySummaryError = useWikiStore((s) => s.setCommunitySummaryError)
   const [showCreateDialog, setShowCreateDialog] = useState(false)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     document.documentElement.style.fontSize = `${Math.round(uiFontSizeScale * 100)}%`
   }, [uiFontSizeScale])
+
+  // 监听社区摘要生成错误，弹窗提示
+  useEffect(() => {
+    if (communitySummaryError) {
+      toast.error(i18n.t("novel.settings.communitySummaryFailed", { message: communitySummaryError }))
+      setCommunitySummaryError(null)
+    }
+  }, [communitySummaryError, setCommunitySummaryError])
 
   // Set up auto-save and clip watcher once on mount
   useEffect(() => {
@@ -72,6 +84,10 @@ function App() {
         const savedAiChatModel = await loadAiChatModel()
         if (savedAiChatModel) {
           useWikiStore.getState().setAiChatModel(savedAiChatModel)
+        }
+        const savedDefaultLlmModel = await loadDefaultLlmModel()
+        if (savedDefaultLlmModel) {
+          useWikiStore.getState().setDefaultLlmModel(savedDefaultLlmModel)
         }
         const savedProviderConfigs = await loadProviderConfigs()
         if (savedProviderConfigs) {
@@ -144,6 +160,10 @@ function App() {
         setLoading(false)
         void checkForAppUpdate()
         void initAnalytics()
+        // 浏览器模式下连接 SSE 事件流
+        if (!isTauri()) {
+          serverEvents.connect()
+        }
       }
     }
     init()

@@ -129,6 +129,7 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
   const setStoredSelectedSoulId = useWikiStore((s) => s.setSelectedSoulId)
   const storedSelectedSoulSection = useWikiStore((s) => s.selectedSoulSection)
   const setStoredSelectedSoulSection = useWikiStore((s) => s.setSelectedSoulSection)
+  const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const [section, setSection] = useState<"builtIn" | "custom">("builtIn")
   const [mode, setMode] = useState<"create" | "edit">("create")
   const [showCustomEditor, setShowCustomEditor] = useState(false)
@@ -136,6 +137,7 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
   const [selectedId, setSelectedId] = useState(BUILT_IN_CHARACTER_AURAS[0]?.id ?? "")
   const [form, setForm] = useState<AuraFormState>(EMPTY_FORM)
   const [characterName, setCharacterName] = useState("")
+  const [characterAliases, setCharacterAliases] = useState("")
   const [characterOptions, setCharacterOptions] = useState<string[]>([])
   const [bindings, setBindings] = useState<CharacterAuraBinding[]>([])
   const [auraPreviewTask, setAuraPreviewTask] = useState("")
@@ -312,10 +314,19 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
   async function handleBind() {
     if (!project || !selected || !characterName.trim() || blockWhileGenerating("角色灵魂生成完成后再绑定人物，避免把半成品绑定进剧情。")) return
     await runAction(async () => {
-      await bindCharacterAura(project.path, { characterName: characterName.trim(), auraId: selected.id })
+      const aliases = characterAliases
+        .split(/[,，、\s]+/)
+        .map((s) => s.trim())
+        .filter(Boolean)
+      await bindCharacterAura(project.path, {
+        characterName: characterName.trim(),
+        auraId: selected.id,
+        aliases: aliases.length > 0 ? aliases : undefined,
+      })
       await refresh()
-      await refreshProjectState(project.path)
+      bumpDataVersion()
       setMessage(`已将「${selected.name}」绑定到人物「${characterName.trim()}」`)
+      setCharacterAliases("")
     }, "绑定失败，请稍后重试")
   }
 
@@ -324,7 +335,7 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
     await runAction(async () => {
       await unbindCharacterAura(project.path, targetCharacterName, selected.id)
       await refresh()
-      await refreshProjectState(project.path)
+      bumpDataVersion()
       setMessage(`已取消“${targetCharacterName}”与“${selected.name}”的绑定`)
     }, "取消绑定失败，请稍后重试")
   }
@@ -560,6 +571,18 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
                 绑定
               </Button>
             </div>
+            <div className="mt-3">
+              <Label>角色别名/昵称（可选，用逗号分隔）</Label>
+              <input
+                type="text"
+                className="mt-1 w-full rounded-md border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-ring"
+                value={characterAliases}
+                onChange={(event) => setCharacterAliases(event.target.value)}
+                placeholder="例如：小林, 烬哥, 林公子"
+                disabled={characterOptions.length === 0 || isGeneratingCustomAura}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">绑定后，任务描述或初稿正文中出现别名时也会命中该角色的灵魂设定。</p>
+            </div>
             <div className="mt-3 rounded-md border bg-muted/20 p-3">
               <div className="text-xs font-medium text-muted-foreground">当前灵魂已绑定人物</div>
               {selectedBindings.length > 0 ? (
@@ -571,7 +594,10 @@ export function CharacterAuraView({ hideSidebar = false }: { hideSidebar?: boole
                       onClick={() => void handleUnbind(binding.characterName)}
                       className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-background px-3 py-1 text-xs qm-hover"
                     >
-                      <span>{binding.characterName}</span>
+                      <span>
+                        {binding.characterName}
+                        {binding.aliases && binding.aliases.length > 0 ? `（别名：${binding.aliases.join("、")}）` : ""}
+                      </span>
                       <Trash2 className="h-3 w-3 text-destructive" />
                     </button>
                   ))}

@@ -355,6 +355,8 @@ function EventHandler({
         onNodeClick(node)
       },
       downNode: (payload: SigmaNodeEventPayload) => {
+        // 只响应左键，右键只用于打开菜单，不触发拖拽
+        if ((payload.event.original as MouseEvent).button !== 0) return
         const node = nodeIdFromPayload(payload)
         payload.preventSigmaDefault()
         payload.event.original.preventDefault()

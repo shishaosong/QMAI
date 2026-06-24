@@ -71,6 +71,18 @@ function chapterText(prefix: string, count = 3000): string {
   return text.slice(0, count)
 }
 
+// 写作阶段现在可能把 user 消息内容拆成带 cache_control 的文本块（见 applyCachePrefix）；
+// provider 侧会把纯文本块拼回字符串，这里在测试桩里也照做，保持按关键字匹配阶段的逻辑。
+function messagesPromptText(messages: ChatMessage[]): string {
+  return messages
+    .map((message) =>
+      typeof message.content === "string"
+        ? message.content
+        : message.content.map((block) => (block.type === "text" ? block.text : "")).join(""),
+    )
+    .join("\n")
+}
+
 function createDeps(reviewResults: NovelReviewResult[] = []): DeepChapterGenerationDeps {
   const responses = [
     "写作任务书内容",
@@ -83,7 +95,7 @@ function createDeps(reviewResults: NovelReviewResult[] = []): DeepChapterGenerat
     contextPackToPrompt: vi.fn(() => "上下文包内容"),
     reviewChapter: vi.fn(async () => reviewResults),
     streamChat: vi.fn(async (_config: LlmConfig, messages: ChatMessage[], callbacks: StreamCallbacks) => {
-      const prompt = messages.map((message) => String(message.content)).join("\n")
+      const prompt = messagesPromptText(messages)
       const content = prompt.includes("简单审查") || prompt.includes("去AI味")
         ? responses[3]
         : prompt.includes("返修")
@@ -157,6 +169,38 @@ describe("runDeepChapterGeneration", () => {
     expect(thinking.join("\n")).toContain("阶段4：AI审稿")
     expect(thinking.join("\n")).toContain("阶段6：简单审查与去AI味")
     expect(thinking.join("\n")).toContain("未发现阻断问题")
+  })
+
+  it("injects the enabled writing style into the stage 3 draft prompt", async () => {
+    const capturedPrompts: string[] = []
+    const enabledStyleContext = "目标文风来源：《长夜书》\n风格硬约束：冷峻克制、短句推进、少解释"
+    const deps = createDeps()
+    vi.mocked(deps.contextPackToPrompt).mockImplementation((pack) => {
+      expect(pack.writingStyle).toContain("悬疑")
+      return enabledStyleContext
+    })
+    vi.mocked(deps.streamChat).mockImplementation(async (_config: LlmConfig, messages: ChatMessage[], callbacks: StreamCallbacks) => {
+      const prompt = messagesPromptText(messages)
+      capturedPrompts.push(prompt)
+      const content = prompt.includes("简单审查") || prompt.includes("去AI味")
+        ? chapterText("最终文风正文", 3000)
+        : prompt.includes("返修")
+          ? chapterText("返修文风正文", 3000)
+          : prompt.includes("正文")
+            ? chapterText("初稿文风正文", 3000)
+            : "写作任务书内容"
+      callbacks.onToken(content)
+      callbacks.onDone()
+    })
+
+    await runDeepChapterGeneration(
+      { projectPath: "E:/Novel", userRequest: "生成第三章", chapterNumber: 3, llmConfig },
+      {},
+      deps,
+    )
+
+    expect(capturedPrompts[1]).toContain("目标文风来源：《长夜书》")
+    expect(capturedPrompts[1]).toContain("冷峻克制")
   })
 
   it("shows a visible golden-three hint in thinking when generating the first chapter", async () => {
@@ -253,7 +297,7 @@ describe("runDeepChapterGeneration", () => {
       contextPackToPrompt: vi.fn(() => "上下文包内容"),
       reviewChapter: vi.fn(async () => []),
       streamChat: vi.fn(async (_config: LlmConfig, messages: ChatMessage[], callbacks: StreamCallbacks) => {
-        const prompt = messages.map((message) => String(message.content)).join("\n")
+        const prompt = messagesPromptText(messages)
         const content = prompt.includes("简单审查") || prompt.includes("去AI味")
           ? finalPolished
           : prompt.includes("扩写补足")
@@ -583,7 +627,7 @@ describe("runDeepChapterGeneration", () => {
       contextPackToPrompt: vi.fn(() => "上下文包内容"),
       reviewChapter: vi.fn(async () => []),
       streamChat: vi.fn(async (_config: LlmConfig, messages: ChatMessage[], callbacks: StreamCallbacks) => {
-        const prompt = messages.map((message) => String(message.content)).join("\n")
+        const prompt = messagesPromptText(messages)
         callbacks.onToken(prompt.includes("章节正文") ? chapterText("被停止的正文", 3000) : "写作任务书内容")
         if (prompt.includes("章节正文")) controller.abort()
         callbacks.onDone()

@@ -11,6 +11,7 @@ import {
 import type { FileNode, WikiProject } from "@/types/wiki"
 import { isAbsolutePath, normalizePath } from "@/lib/path-utils"
 import { useWikiStore } from "@/stores/wiki-store"
+import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 import type { ScheduledImportConfig } from "@/stores/wiki-store"
 import {
   loadScheduledImportConfig,
@@ -315,7 +316,7 @@ export async function scanAndImport(
     const tree = await listDirectory(importRoot)
     const db = await loadImportDb(projectPath, importRoot)
     const nextDb: ImportDb = { files: {}, lastScan: Date.now() }
-    const llmConfig = useWikiStore.getState().llmConfig
+    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
     const changedFiles: Array<{ key: string; md5: string; destPath: string }> = []
 
     for (const file of collectFiles(tree)) {

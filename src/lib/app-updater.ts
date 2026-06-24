@@ -1,14 +1,9 @@
 import { isTauri } from "@/lib/platform"
-
-type UpdateHandle = {
-  version: string
-  body?: string | null
-  downloadAndInstall: () => Promise<void>
-}
+import type { Update } from "@tauri-apps/plugin-updater"
 
 type UpdaterBindings = {
   isTauri: boolean
-  check: () => Promise<UpdateHandle | null>
+  check: () => Promise<Update | null>
   confirm: (message: string, options?: Record<string, unknown>) => Promise<boolean>
   message: (message: string, options?: Record<string, unknown>) => Promise<unknown>
 }
@@ -33,15 +28,47 @@ export async function runAppUpdateFlow(bindings: UpdaterBindings) {
   )
   if (!confirmed) return
 
-  await bindings.message(
-    "开始下载并安装更新。Windows 安装阶段会自动关闭当前软件，请先保存正在编辑的内容。",
+  // 先下载更新包
+  try {
+    await bindings.message(
+      "正在下载更新，请稍候...",
+      {
+        title: "下载更新",
+        kind: "info",
+        okLabel: "知道了",
+      },
+    )
+    await update.download()
+  } catch (error) {
+    await bindings.message(
+      `下载更新失败：${error instanceof Error ? error.message : String(error)}\n\n请稍后重试或前往 GitHub 手动下载安装包。`,
+      {
+        title: "下载失败",
+        kind: "error",
+        okLabel: "知道了",
+      },
+    )
+    return
+  }
+
+  // 下载完成后，提示用户即将退出并安装
+  const installConfirmed = await bindings.confirm(
+    "更新已下载完成。点击「立即安装」将关闭软件并开始安装，请确保已保存编辑内容。",
     {
-      title: "开始更新",
+      title: "准备安装",
       kind: "info",
-      okLabel: "知道了",
+      okLabel: "立即安装",
+      cancelLabel: "稍后安装",
     },
   )
-  await update.downloadAndInstall()
+  if (!installConfirmed) return
+
+  // 调用安装，软件会在安装前自动退出
+  try {
+    await update.install()
+  } catch {
+    // 预期行为：软件在安装过程中会重启，这里的 catch 正常
+  }
 }
 
 export async function checkForAppUpdate() {

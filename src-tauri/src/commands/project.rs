@@ -19,7 +19,7 @@ pub fn create_project(name: String, path: String) -> Result<WikiProject, String>
     run_guarded("create_project", || create_project_impl(name, path))
 }
 
-fn create_project_impl(name: String, path: String) -> Result<WikiProject, String> {
+pub fn create_project_impl(name: String, path: String) -> Result<WikiProject, String> {
     let root = Path::new(&path).join(&name);
 
     if root.exists() {
@@ -311,7 +311,7 @@ pub async fn open_file_location(app: AppHandle, path: String) -> Result<(), Stri
     .map_err(|e| format!("open_file_location blocking task join error: {e}"))?
 }
 
-fn validate_wiki_project_root(root: &Path) -> Result<(), String> {
+pub fn validate_wiki_project_root(root: &Path) -> Result<(), String> {
     if !root.exists() {
         return Err(format!("路径不存在：'{}'", root.display()));
     }
@@ -386,7 +386,7 @@ outline_type: master-outline | volume-outline | chapter-outline
     Ok(())
 }
 
-fn migrate_project_dirs(root: &Path) -> Result<(), String> {
+pub fn migrate_project_dirs(root: &Path) -> Result<(), String> {
     rename_project_dir_if_safe(root, LEGACY_META_DIR, META_DIR)?;
     rename_project_dir_if_safe(root, LEGACY_KNOWLEDGE_DIR, KNOWLEDGE_DIR)?;
     Ok(())

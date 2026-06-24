@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/dialog"
 import { useReviewStore, type ReviewItem } from "@/stores/review-store"
 import { useWikiStore } from "@/stores/wiki-store"
+import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 import { writeFile, readFile, listDirectory, deleteFile } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { loadCognitionState, type CognitionState } from "@/lib/novel/character-cognition"
@@ -83,6 +84,8 @@ interface ReviewViewProps {
   emptyMessage?: string
   resultScoreDimensionKeys?: string[]
   dimensionKey?: SixReviewDimensionKey
+  /** 只展示角色一致性（character_consistency）类型的问题 */
+  characterOnly?: boolean
 }
 
 export function ReviewView({
@@ -90,6 +93,7 @@ export function ReviewView({
   emptyMessage,
   resultScoreDimensionKeys,
   dimensionKey,
+  characterOnly = false,
 }: ReviewViewProps = {}) {
   const { t } = useTranslation()
   const novelMode = useWikiStore((s) => s.novelMode)
@@ -108,7 +112,11 @@ export function ReviewView({
   const setPendingEditorHighlight = useWikiStore((s) => s.setPendingEditorHighlight)
   const bumpDataVersion = useWikiStore((s) => s.bumpDataVersion)
   const reviewRun = useWikiStore((s) => s.reviewRun)
-  const novelReviewResults = reviewRun?.results ?? []
+  const allReviewResults = reviewRun?.results ?? []
+  // characterOnly 模式下只展示角色一致性（character_consistency）类型的问题
+  const novelReviewResults = characterOnly
+    ? allReviewResults.filter((item) => item.type === "character_consistency")
+    : allReviewResults
   const isReviewing = reviewRun?.running ?? false
   const reviewError = reviewRun?.error
   const [reviewHistory, setReviewHistory] = useState<GenerationHistoryEntry[]>([])
@@ -233,7 +241,7 @@ export function ReviewView({
     chapterContent: string,
     targetOriginalText?: string,
   ): Promise<ReviewRewriteEdit[]> => {
-    const llmConfig = useWikiStore.getState().llmConfig
+    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
     const directAnchors = targetOriginalText
       ? findReviewRewriteAnchors(chapterContent, [targetOriginalText])
       : findReviewRewriteAnchors(chapterContent, [item.evidence, item.secondaryEvidence])
@@ -279,7 +287,7 @@ export function ReviewView({
       showAiRewriteAlert("当前没有打开项目。")
       return
     }
-    const llmConfig = useWikiStore.getState().llmConfig
+    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
     if (!hasUsableLlm(llmConfig)) {
       showAiRewriteAlert("请先在设置里配置可用的 AI 模型。")
       return

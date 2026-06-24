@@ -1,9 +1,8 @@
-import type { LlmConfig } from "@/stores/wiki-store"
+﻿import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat, type ChatMessage, type RequestOverrides, type StreamCallbacks } from "@/lib/llm-client"
 import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
 import { useWikiStore } from "@/stores/wiki-store"
 import { buildContextPack, contextPackToPrompt, type ContextPack } from "./context-engine"
-import { resolveNovelModel } from "./model-resolver"
 import { reviewChapter, type NovelReviewResult } from "./review-adapter"
 import type { TaskRouteResult } from "./task-router"
 import type { GoldenThreeChapterRequest } from "./golden-three-chapters"
@@ -15,6 +14,7 @@ import {
   buildDeepChapterExpansionPrompt,
   buildDeepChapterFinalPolishPrompt,
   buildDeepChapterRevisionPrompt,
+  buildStableContextPrefix,
 } from "./deep-chapter-prompts"
 
 export interface DeepChapterGenerationInput {
@@ -152,14 +152,15 @@ export async function runDeepChapterGeneration(
   const resumeCheckpoint = input.resumeCheckpoint
   const writingConfig = resolveWritingConfig(input.llmConfig)
   const lengthSpec = resolveCurrentChapterLengthSpec()
+  const novelConfig = useWikiStore.getState().novelConfig
   const { loadSmartDeAiSkill } = await import("./de-ai-adapter")
 
   // 将在阶段1构建contextPack后再加载skill（需要contextPack用于场景检测）
   let customDeAiSkill: string | null = null
 
-  // 阶段0：前情分析（仅当章节号>1时）
+  // 阶段0：前情分析（仅当章节号>1，且设置开启时；记忆库的近期摘要与上一章结尾仍会注入）
   let previousChaptersAnalysis = ""
-  if (input.chapterNumber && input.chapterNumber > 1 && !resumeCheckpoint) {
+  if (input.chapterNumber && input.chapterNumber > 1 && !resumeCheckpoint && novelConfig.deepPreviousChaptersAnalysis) {
     callbacks.onThinking?.(formatStageThinking("阶段0：前情分析", "正在读取并分析前3章完整内容..."))
     const { analyzePreviousChapters } = await import("./previous-chapters-analysis")
     try {
@@ -217,6 +218,11 @@ export async function runDeepChapterGeneration(
     input.dismantlingReferenceDirective,
   ].filter(Boolean).join("\n\n")
 
+  // 稳定上下文前缀：与任务书/初稿/扩写/返修/去AI味各阶段提示词开头逐字节一致。
+  // 作为显式 prompt 缓存断点传入（Anthropic/MiniMax 走 cache_control；
+  // OpenAI/DeepSeek 该断点被折叠回字符串、由其自动前缀缓存命中）。
+  const cachePrefix = buildStableContextPrefix(outlinePrompt, contextPrompt)
+
   if (!resumeCheckpoint) {
     callbacks.onThinking?.(formatContextThinking(input, contextPack))
     callbacks.onCheckpoint?.(createResumeCheckpoint(input, "after_context"))
@@ -241,6 +247,8 @@ export async function runDeepChapterGeneration(
       deps,
       signal,
       (partial) => callbacks.onThinking?.(formatStageThinking("阶段2：写作任务书", partial)),
+      undefined,
+      cachePrefix,
     )
     assertNotAborted(signal)
     callbacks.onThinking?.(formatStageThinking("阶段2：写作任务书", taskBrief))
@@ -267,6 +275,7 @@ export async function runDeepChapterGeneration(
       signal,
       (partial) => callbacks.onThinking?.(formatStageThinking("阶段3：正文初稿", partial)),
       { max_tokens: lengthSpec.maxOutputTokens },
+      cachePrefix,
     )
     assertNotAborted(signal)
     if (countChapterChars(draftContent) < lengthSpec.minChars) {
@@ -289,6 +298,7 @@ export async function runDeepChapterGeneration(
         signal,
         (partial) => callbacks.onThinking?.(formatStageThinking("阶段3：正文扩写补足", partial)),
         { max_tokens: lengthSpec.maxOutputTokens },
+        cachePrefix,
       )
       assertNotAborted(signal)
     }
@@ -302,22 +312,31 @@ export async function runDeepChapterGeneration(
 
   let reviewResults = hasCheckpointReview(resumeCheckpoint) ? resumeCheckpoint.reviewResults : []
   if (!hasCheckpointReview(resumeCheckpoint)) {
-    callbacks.onThinking?.(formatStageThinking(
-      "阶段4：AI审稿",
-      "正在检查正文完整性、剧情连续性、是否被截断以及是否存在阻断问题。",
-    ))
-    try {
-      reviewResults = signal
-        ? await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, { onThinking: callbacks.onThinking }, signal)
-        : await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, { onThinking: callbacks.onThinking })
-    } catch (err) {
-      console.error("[Deep Chapter] Review failed:", err)
-      reviewResults = []
+    if (!novelConfig.deepChapterReview) {
+      callbacks.onThinking?.(formatStageThinking(
+        "阶段4-5：已跳过审稿与返修",
+        "已按设置关闭 AI 审稿，初稿将直接进入阶段6简单审查与去AI味。",
+      ))
+    } else {
+      callbacks.onThinking?.(formatStageThinking(
+        "阶段4：AI审稿",
+        "正在检查正文完整性、剧情连续性、是否被截断以及是否存在阻断问题。",
+      ))
+      try {
+        // 复用阶段1已构建的 contextPack，避免审稿内部再 buildContextPack 一次
+        // （会重复跑检索 / 向量 / 图谱）。
+        reviewResults = signal
+          ? await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, { onThinking: callbacks.onThinking, contextPack }, signal)
+          : await deps.reviewChapter(input.projectPath, draftContent, input.chapterNumber, { onThinking: callbacks.onThinking, contextPack })
+      } catch (err) {
+        console.error("[Deep Chapter] Review failed:", err)
+        reviewResults = []
+      }
+      reviewResults = reviewResults || []
+      assertNotAborted(signal)
+      callbacks.onThinking?.(formatReviewThinking(reviewResults))
+      callbacks.onCheckpoint?.(createResumeCheckpoint(input, "after_review", { taskBrief, draftContent, reviewResults }))
     }
-    reviewResults = reviewResults || []
-    assertNotAborted(signal)
-    callbacks.onThinking?.(formatReviewThinking(reviewResults))
-    callbacks.onCheckpoint?.(createResumeCheckpoint(input, "after_review", { taskBrief, draftContent, reviewResults }))
   }
 
   const blockingIssues = reviewResults.filter((item) => item.severity === "error")
@@ -328,10 +347,12 @@ export async function runDeepChapterGeneration(
     currentContent = resumeCheckpoint.currentContent.trim()
     revised = true
   } else if (blockingIssues.length === 0) {
-    callbacks.onThinking?.(formatStageThinking(
-      "阶段5：无需自动返修",
-      "AI审稿未发现阻断问题，跳过自动返修，进入阶段6简单审查与去AI味。",
-    ))
+    if (novelConfig.deepChapterReview) {
+      callbacks.onThinking?.(formatStageThinking(
+        "阶段5：无需自动返修",
+        "AI审稿未发现阻断问题，跳过自动返修，进入阶段6简单审查与去AI味。",
+      ))
+    }
   } else {
     const revisedContent = await collectModelText(
       writingConfig,
@@ -352,6 +373,7 @@ export async function runDeepChapterGeneration(
       signal,
       (partial) => callbacks.onThinking?.(formatStageThinking("阶段5：自动返修", partial)),
       { max_tokens: lengthSpec.maxOutputTokens },
+      cachePrefix,
     )
     assertNotAborted(signal)
     callbacks.onThinking?.(formatStageThinking(
@@ -374,6 +396,40 @@ export async function runDeepChapterGeneration(
     }))
   }
 
+  // 阶段5.5：返修后复审（只在发生了返修时执行，只审查角色一致性维度，降低token消耗，不再自动返修避免循环）
+  if (revised && novelConfig.deepChapterReview) {
+    callbacks.onThinking?.(formatStageThinking(
+      "阶段5.5：返修后角色一致性复审",
+      "正在对返修后的正文进行角色一致性专项复审（轻量模式，只检查角色相关维度），确认返修是否引入新的角色偏差。",
+    ))
+    try {
+      const postRevisionResults = signal
+        ? await deps.reviewChapter(input.projectPath, currentContent, input.chapterNumber, { onThinking: callbacks.onThinking, contextPack, characterOnly: true }, signal)
+        : await deps.reviewChapter(input.projectPath, currentContent, input.chapterNumber, { onThinking: callbacks.onThinking, contextPack, characterOnly: true })
+      const postBlockingIssues = (postRevisionResults || []).filter((item) => item.severity === "error")
+      if (postBlockingIssues.length > 0) {
+        callbacks.onThinking?.(formatStageThinking(
+          "阶段5.5：返修后复审",
+          [
+            `返修后复审发现 ${postBlockingIssues.length} 个阻断问题（不再自动返修，避免循环）：`,
+            "",
+            formatReviewIssueList(postBlockingIssues),
+            "",
+            "这些问题将在阶段6去AI味时一并处理，或需要手动修改。",
+          ].join("\n"),
+        ))
+        reviewResults = [...reviewResults, ...(postRevisionResults || [])]
+      } else {
+        callbacks.onThinking?.(formatStageThinking(
+          "阶段5.5：返修后复审",
+          "返修后复审未发现新的阻断问题，进入阶段6。",
+        ))
+      }
+    } catch (err) {
+      console.error("[Deep Chapter] 返修后复审失败:", err)
+    }
+  }
+
   const finalContent = await finalPolishChapter(
     writingConfig,
     outlinePrompt,
@@ -387,6 +443,7 @@ export async function runDeepChapterGeneration(
     signal,
     customDeAiSkill || undefined,
     lengthSpec,
+    cachePrefix,
   )
   callbacks.onThinking?.(formatStageThinking(
     "阶段7：完成",
@@ -417,6 +474,7 @@ async function finalPolishChapter(
   signal?: AbortSignal,
   customDeAiSkill?: string,
   lengthSpec: ChapterLengthSpec = resolveChapterLengthSpec(),
+  cachePrefix?: string,
 ): Promise<string> {
   assertNotAborted(signal)
   callbacks.onThinking?.(formatStageThinking("阶段6：简单审查与去AI味", "正在进行最后一遍简单审查，去除复读、机械套话和 AI 味。"))
@@ -439,6 +497,7 @@ async function finalPolishChapter(
     signal,
     (partial) => callbacks.onThinking?.(formatStageThinking("阶段6：简单审查与去AI味", partial)),
     { max_tokens: lengthSpec.maxOutputTokens },
+    cachePrefix,
   )
   assertNotAborted(signal)
   return polished.trim() ? polished : currentContent
@@ -450,8 +509,37 @@ function resolveCurrentChapterLengthSpec(): ChapterLengthSpec {
 }
 
 function resolveWritingConfig(llmConfig: LlmConfig): LlmConfig {
-  const novelConfig = useWikiStore.getState().novelConfig
-  return resolveNovelModel(llmConfig, novelConfig, "writing")
+  // 写作模型已移除，始终使用 AI 会话当前模型。
+  // llmConfig 已在 chat-panel.tsx 中通过 effectiveChatLlmConfig 正确解析，
+  // 不再通过 resolveNovelModel 重新解析，避免二次解析使用不同 API 端点/密钥
+  return llmConfig
+}
+
+/**
+ * 把以 cachePrefix 开头的 user 字符串消息拆成 [前缀块(cacheControl), 余下块]，
+ * 让 provider 在稳定上下文前缀上打缓存断点。其余消息原样返回。
+ * 注：Anthropic/MiniMax 会据此发出 cache_control；OpenAI/DeepSeek 端纯文本块会被
+ * 折叠回与原字符串逐字节一致的内容，不影响其自动前缀缓存。
+ */
+function applyCachePrefix(messages: ChatMessage[], cachePrefix?: string): ChatMessage[] {
+  if (!cachePrefix) return messages
+  return messages.map((message) => {
+    if (
+      message.role === "user" &&
+      typeof message.content === "string" &&
+      message.content.startsWith(cachePrefix)
+    ) {
+      const rest = message.content.slice(cachePrefix.length)
+      return {
+        role: message.role,
+        content: [
+          { type: "text" as const, text: cachePrefix, cacheControl: true },
+          ...(rest ? [{ type: "text" as const, text: rest }] : []),
+        ],
+      }
+    }
+    return message
+  })
 }
 
 async function collectModelText(
@@ -461,6 +549,7 @@ async function collectModelText(
   signal?: AbortSignal,
   onUpdate?: (content: string) => void,
   requestOverrides?: RequestOverrides,
+  cachePrefix?: string,
 ): Promise<string> {
   let content = ""
   let reasoningBuffer = ""
@@ -478,7 +567,7 @@ async function collectModelText(
 
   await deps.streamChat(
     config,
-    messages,
+    applyCachePrefix(messages, cachePrefix),
     {
       onToken: (token) => {
         if (signal?.aborted) {
@@ -612,14 +701,28 @@ function formatReviewThinking(reviewResults: NovelReviewResult[]): string {
   if (reviewResults.length === 0) {
     return formatStageThinking("阶段4：AI审稿", "未发现阻断问题。")
   }
-  return formatStageThinking(
-    "阶段4：AI审稿",
-    [
-      `发现 ${reviewResults.length} 个问题，其中阻断问题 ${reviewResults.filter((item) => item.severity === "error").length} 个。`,
-      "",
-      formatReviewIssueList(reviewResults),
-    ].join("\n"),
-  )
+  const characterIssues = reviewResults.filter((item) => item.type === "character_consistency")
+  const otherIssues = reviewResults.filter((item) => item.type !== "character_consistency")
+  const errorCount = reviewResults.filter((item) => item.severity === "error").length
+  const sections: string[] = [
+    `发现 ${reviewResults.length} 个问题，其中阻断问题 ${errorCount} 个。`,
+  ]
+
+  // 角色命中记忆库报告（单独展示 character_consistency 类型的问题）
+  if (characterIssues.length > 0) {
+    sections.push("")
+    sections.push("【角色命中记忆库报告】")
+    sections.push(formatReviewIssueList(characterIssues))
+  }
+
+  // 其他问题
+  if (otherIssues.length > 0) {
+    sections.push("")
+    sections.push("【其他审查问题】")
+    sections.push(formatReviewIssueList(otherIssues))
+  }
+
+  return formatStageThinking("阶段4：AI审稿", sections.join("\n"))
 }
 
 function formatStageThinking(title: string, content: string): string {

@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core"
 import { isTauri } from "@/lib/platform"
-import { DEFAULT_CLIP_SERVER_CONFIG, normalizeClipServerConfig } from "@/lib/project-store"
+import { httpClip } from "@/lib/http-adapter"
+import { normalizeClipServerConfig } from "@/lib/project-store"
 import type { ClipServerConfig } from "@/stores/wiki-store"
 
 export interface ClipServerRuntimeConfig extends ClipServerConfig {
@@ -14,7 +15,8 @@ export function getClipServerUrl(config: Pick<ClipServerConfig, "port">): string
 
 export async function getClipServerConfig(): Promise<ClipServerRuntimeConfig> {
   if (!isTauri()) {
-    return { ...DEFAULT_CLIP_SERVER_CONFIG, status: "stopped" }
+    const config = await httpClip.getConfig()
+    return config as ClipServerRuntimeConfig
   }
   return invoke<ClipServerRuntimeConfig>("get_clip_server_config")
 }
@@ -22,14 +24,16 @@ export async function getClipServerConfig(): Promise<ClipServerRuntimeConfig> {
 export async function setClipServerRuntimeConfig(config: ClipServerConfig): Promise<ClipServerRuntimeConfig> {
   const normalized = normalizeClipServerConfig(config)
   if (!isTauri()) {
-    return { ...normalized, status: normalized.enabled ? "running" : "stopped" }
+    const result = await httpClip.setConfig(normalized)
+    return result as ClipServerRuntimeConfig
   }
   return invoke<ClipServerRuntimeConfig>("set_clip_server_config", { config: normalized })
 }
 
 export async function stopClipServer(): Promise<ClipServerRuntimeConfig> {
   if (!isTauri()) {
-    return { ...DEFAULT_CLIP_SERVER_CONFIG, enabled: false, status: "stopped" }
+    const result = await httpClip.stop()
+    return result as ClipServerRuntimeConfig
   }
   return invoke<ClipServerRuntimeConfig>("stop_clip_server")
 }

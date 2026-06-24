@@ -40,6 +40,7 @@ export interface ContextPack {
   task: string
   chapterGoal: string
   outline: string
+  recentChapterContents?: string[]
   recentSummaries: string[]
   previousChapterEnding: string
   characterStates: string
@@ -129,6 +130,9 @@ async function buildContextPackFromRawData(
   const recentSummaries = snapshotRecentSummaries.length > 0 
     ? snapshotRecentSummaries 
     : rawData.fallbackRecentSummaries
+  const recentChapterContents = Array.isArray(rawData.recentChapterContents)
+    ? rawData.recentChapterContents
+    : []
   
   const previousChapterEnding = rawData.snapshots.previousChapterEnding 
     || rawData.fallbackPreviousEnding
@@ -185,6 +189,7 @@ async function buildContextPackFromRawData(
     task: context.task,
     chapterGoal,
     outline: mergedOutline,
+    recentChapterContents,
     recentSummaries,
     previousChapterEnding,
     characterStates,
@@ -333,6 +338,7 @@ function emptyPack(task: string): ContextPack {
     task,
     chapterGoal: "",
     outline: "",
+    recentChapterContents: [],
     recentSummaries: [],
     previousChapterEnding: "",
     characterStates: "",
@@ -648,6 +654,14 @@ async function readCanonRules(pp: string): Promise<string> {
 
 // @ts-expect-error - 函数通过动态导入在 context-data-sources.ts 中使用
 async function readWritingStyle(pp: string): Promise<string> {
+  // 优先：已启用的拆书作品文风预设（feature/book-style-extraction）。
+  // buildWritingStyleContext 内部已做长度上限与"只学文风不借剧情"硬约束。
+  try {
+    const { buildWritingStyleContext } = await import("./writing-style-store")
+    const styleContext = await buildWritingStyleContext(pp)
+    if (styleContext.trim()) return styleContext
+  } catch {}
+  // 回退：wiki 中的风格页（旧行为）。
   try {
     const results = await searchWiki(pp, "style 风格 writing 写作")
     if (results.length > 0) {
@@ -935,11 +949,23 @@ export async function searchGraphRelevantContent(
         purpose: "用于补充图谱关联上下文，优先保留和当前任务最直接相关的关联节点。",
       },
     ).catch(() => scoredNodes.slice(0, 10))
-    if (topNodes.length === 0) return ""
 
-    return topNodes.map(
-      n => `- 【${n.title}】(关联度 ${n.relevance}): ${n.snippet}`,
-    ).join("\n")
+    const nodeResults = topNodes.length > 0
+      ? topNodes.map(
+          n => `- 【${n.title}】(关联度 ${n.relevance}): ${n.snippet}`,
+        ).join("\n")
+      : ""
+
+    // 追加社区摘要向量检索
+    let communityResults = ""
+    try {
+      const { searchCommunitySummaries } = await import("./community-summary")
+      communityResults = await searchCommunitySummaries(pp, task, 3)
+    } catch {
+      // 社区摘要检索失败不影响主流程
+    }
+
+    return [nodeResults, communityResults].filter(Boolean).join("\n")
   } catch {
     return ""
   }
@@ -981,6 +1007,7 @@ const FIELD_CONFIGS: FieldConfig[] = [
   { titleKey: "novel.contextPack.soulDoc", fieldKey: "soulDoc" },
   { titleKey: "novel.contextPack.recentRevisionDirectives", fieldKey: "revisionDirectives" },
   { titleKey: "novel.contextPack.requiredOutline", fieldKey: "outline" },
+  { titleKey: "novel.contextPack.recentChapterContents", fieldKey: "recentChapterContents" },
   { titleKey: "novel.contextPack.recentPlotSummaries", fieldKey: "recentSummaries" },
   { titleKey: "novel.contextPack.previousChapterEnding", fieldKey: "previousChapterEnding" },
   { titleKey: "novel.contextPack.characterStates", fieldKey: "characterStates" },

@@ -1,10 +1,11 @@
 import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
-import { ClipboardCheck, Sparkles } from "lucide-react"
+import { ClipboardCheck, Sparkles, Users } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { listDirectory, readFile } from "@/commands/fs"
 import { flattenMdFiles } from "@/lib/novel/chapter-utils"
 import { parseFrontmatter } from "@/lib/frontmatter"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import { SIX_REVIEW_DIMENSIONS, SIX_REVIEW_DIMENSION_ORDER } from "@/lib/novel/dimension-review-adapter"
 
 const SIX_DIMENSIONS = SIX_REVIEW_DIMENSION_ORDER.map((key) => ({
@@ -99,9 +100,9 @@ export function ReviewCenterSidebarPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center border-b px-3 py-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <div className="flex items-center gap-2 text-sm font-semibold">
           <ClipboardCheck className="h-4 w-4 text-primary" />
-          {t("reviewCenter.title")}
+          <PanelHeaderWithHelp title={t("reviewCenter.title")} helpKey="review" />
         </div>
       </div>
 
@@ -142,6 +143,18 @@ export function ReviewCenterSidebarPanel() {
             <div className="flex items-center gap-2">
               <Sparkles className="h-4 w-4" />
               <span>{t("reviewCenter.aiReview")}</span>
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => setSelectedReviewDimension("character-report")}
+            className={`mt-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+              selectedReviewDimension === "character-report" ? "qm-selected" : "text-muted-foreground qm-hover"
+            }`}
+          >
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4" />
+              <span>角色命中报告</span>
             </div>
           </button>
         </div>

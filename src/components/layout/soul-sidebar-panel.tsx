@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
 import { Sparkles, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import {
   bindCharacterAura,
   BUILT_IN_CHARACTER_AURAS,
@@ -80,10 +81,10 @@ export function SoulSidebarPanel() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex shrink-0 items-center border-b px-3 py-2">
-        <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+      <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
+        <div className="flex items-center gap-2 text-sm font-semibold">
           <Sparkles className="h-4 w-4 text-primary" />
-          {t("nav.soul")}
+          <PanelHeaderWithHelp title={t("nav.soul")} helpKey="soul" />
         </div>
       </div>
 

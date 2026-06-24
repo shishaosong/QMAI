@@ -4,6 +4,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { normalizePath, isAbsolutePath } from "@/lib/path-utils"
 import { getProjectPathById } from "@/lib/project-identity"
 import { hasUsableLlm } from "@/lib/has-usable-llm"
+import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 
 // ── Types ─────────────────────────────────────────────────────────────────
 
@@ -513,7 +514,7 @@ async function processNext(projectId: string): Promise<void> {
   await saveQueue(pp)
   if (currentProjectId !== projectId) return
 
-  const llmConfig = useWikiStore.getState().llmConfig
+  const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
 
   // Check if LLM is configured
   if (!hasUsableLlm(llmConfig)) {

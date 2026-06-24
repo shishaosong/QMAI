@@ -3,6 +3,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { Filter, SlidersHorizontal, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { GRAPH_MODE_LABELS, type GraphMode } from "@/lib/graph-mode"
+import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 
 type ColorMode = "type" | "community"
 type GraphDisplayMode = "graph" | "document" | "mindmap"
@@ -35,8 +36,8 @@ export function GraphSidebarPanel() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex shrink-0 items-center justify-between border-b px-3 py-2">
-        <div className="text-sm font-semibold text-foreground">
-          {t("novel.graph.title")}
+        <div className="flex items-center gap-1.5 text-sm font-semibold">
+          <PanelHeaderWithHelp title={t("novel.graph.title")} helpKey="graph" />
         </div>
         <Button
           type="button"

@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback, useEffect, type ReactNode } from "react"
 import { useTranslation } from "react-i18next"
 import { useWikiStore } from "@/stores/wiki-store"
+import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 import { readFile, writeFile } from "@/commands/fs"
 import {
   AlertTriangle,
@@ -308,7 +309,7 @@ export function DashboardView({ headerActions }: DashboardViewProps = {}) {
       showAiRewriteAlert("当前没有打开项目。")
       return
     }
-    const llmConfig = useWikiStore.getState().llmConfig
+    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
     if (!hasUsableLlm(llmConfig)) {
       showAiRewriteAlert("请先在设置里配置可用的 AI 模型。")
       return

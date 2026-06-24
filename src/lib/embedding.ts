@@ -22,6 +22,8 @@
 
 import { readFile, listDirectory } from "@/commands/fs"
 import { invoke } from "@tauri-apps/api/core"
+import { isTauri } from "@/lib/platform"
+import { httpVector } from "@/lib/http-adapter"
 import type { EmbeddingConfig } from "@/stores/wiki-store"
 import type { FileNode } from "@/types/wiki"
 import { normalizePath } from "@/lib/path-utils"
@@ -276,8 +278,18 @@ async function vectorUpsertChunks(
   pageId: string,
   chunks: ChunkUpsertInput[],
 ): Promise<void> {
+  const pp = normalizePath(projectPath)
+  if (!isTauri()) {
+    await httpVector.upsertChunks(pp, pageId, chunks.map((c) => ({
+      chunkIndex: c.chunkIndex,
+      chunkText: c.chunkText,
+      headingPath: c.headingPath,
+      embedding: c.embedding,
+    })))
+    return
+  }
   await invoke("vector_upsert_chunks", {
-    projectPath: normalizePath(projectPath),
+    projectPath: pp,
     pageId,
     chunks: chunks.map((c) => ({
       chunk_index: c.chunkIndex,
@@ -302,30 +314,55 @@ async function vectorSearchChunks(
   queryEmbedding: number[],
   topK: number,
 ): Promise<ChunkSearchResult[]> {
+  const pp = normalizePath(projectPath)
+  if (!isTauri()) {
+    const results = await httpVector.searchChunks(pp, queryEmbedding, topK)
+    return results.map((r) => ({
+      chunk_id: r.chunkId,
+      page_id: r.pageId,
+      chunk_index: r.chunkIndex,
+      chunk_text: r.chunkText,
+      heading_path: r.headingPath,
+      score: r.score,
+    })) as ChunkSearchResult[]
+  }
   return await invoke("vector_search_chunks", {
-    projectPath: normalizePath(projectPath),
+    projectPath: pp,
     queryEmbedding: queryEmbedding.map((v) => Math.fround(v)),
     topK,
   })
 }
 
 async function vectorDeletePage(projectPath: string, pageId: string): Promise<void> {
+  const pp = normalizePath(projectPath)
+  if (!isTauri()) {
+    await httpVector.deletePage(pp, pageId)
+    return
+  }
   await invoke("vector_delete_page", {
-    projectPath: normalizePath(projectPath),
+    projectPath: pp,
     pageId,
   })
 }
 
 async function vectorCountChunks(projectPath: string): Promise<number> {
+  const pp = normalizePath(projectPath)
+  if (!isTauri()) {
+    return await httpVector.countChunks(pp)
+  }
   return await invoke("vector_count_chunks", {
-    projectPath: normalizePath(projectPath),
+    projectPath: pp,
   })
 }
 
 export async function legacyVectorRowCount(projectPath: string): Promise<number> {
   try {
+    const pp = normalizePath(projectPath)
+    if (!isTauri()) {
+      return await httpVector.legacyRowCount(pp)
+    }
     return await invoke("vector_legacy_row_count", {
-      projectPath: normalizePath(projectPath),
+      projectPath: pp,
     })
   } catch {
     return 0
@@ -333,8 +370,13 @@ export async function legacyVectorRowCount(projectPath: string): Promise<number>
 }
 
 export async function dropLegacyVectorTable(projectPath: string): Promise<void> {
+  const pp = normalizePath(projectPath)
+  if (!isTauri()) {
+    await httpVector.dropLegacy(pp)
+    return
+  }
   await invoke("vector_drop_legacy", {
-    projectPath: normalizePath(projectPath),
+    projectPath: pp,
   })
 }
 

@@ -7,8 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
 import { saveNovelMode, saveNovelConfig } from "@/lib/project-store"
-import { normalizePath } from "@/lib/path-utils"
-import { exportProject } from "@/lib/novel/export"
+
 import { testNovelModel, type TestableNovelModelTask } from "@/lib/novel/novel-model-test"
 import { ChatModelSelector } from "@/components/chat/chat-model-selector"
 import type { SettingsDraft, DraftSetter } from "../settings-types"
@@ -25,9 +24,7 @@ export function NovelSection({ draft, setDraft }: Props) {
   const setNovelMode = useWikiStore((s) => s.setNovelMode)
   const setNovelConfigStore = useWikiStore((s) => s.setNovelConfig)
   const llmConfig = useWikiStore((s) => s.llmConfig)
-  const aiChatModel = useWikiStore((s) => s.aiChatModel)
   const project = useWikiStore((s) => s.project)
-  const [exportStatus, setExportStatus] = useState<string>("")
   const [testStates, setTestStates] = useState<Record<TestableNovelModelTask, {
     loading: boolean
     message: string
@@ -276,8 +273,139 @@ export function NovelSection({ draft, setDraft }: Props) {
             </button>
           </div>
 
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5">
+              <Label>{t("novel.settings.deepPreviousChaptersAnalysis")}</Label>
+              {settingTooltip("deepPreviousChaptersAnalysisHint")}
+            </div>
+            <button
+              type="button"
+              onClick={() => updateNovelConfig({ deepPreviousChaptersAnalysis: !draft.novelConfig.deepPreviousChaptersAnalysis })}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                draft.novelConfig.deepPreviousChaptersAnalysis ? "bg-primary" : "bg-input"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                  draft.novelConfig.deepPreviousChaptersAnalysis ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5">
+              <Label>{t("novel.settings.deepChapterReview")}</Label>
+              {settingTooltip("deepChapterReviewHint")}
+            </div>
+            <button
+              type="button"
+              onClick={() => updateNovelConfig({ deepChapterReview: !draft.novelConfig.deepChapterReview })}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                draft.novelConfig.deepChapterReview ? "bg-primary" : "bg-input"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                  draft.novelConfig.deepChapterReview ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5">
+              <Label>{t("novel.settings.reviewReasoningEffort")}</Label>
+              {settingTooltip("reviewReasoningEffortHint")}
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {(["low", "medium", "high"] as const).map((m) => {
+                const active = (draft.novelConfig.reviewReasoningEffort ?? "high") === m
+                return (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => updateNovelConfig({ reviewReasoningEffort: m })}
+                    className={`rounded-md border px-2.5 py-1 text-xs transition-colors ${
+                      active
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border hover:bg-accent"
+                    }`}
+                  >
+                    {t(`settings.sections.llm.reasoning.${m}`)}
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5">
+              <Label>{t("novel.settings.communitySummaryEnabled")}</Label>
+              {settingTooltip("communitySummaryEnabledHint")}
+            </div>
+            <button
+              type="button"
+              onClick={() => updateNovelConfig({ communitySummaryEnabled: !draft.novelConfig.communitySummaryEnabled })}
+              className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                draft.novelConfig.communitySummaryEnabled ? "bg-primary" : "bg-input"
+              }`}
+            >
+              <span
+                className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                  draft.novelConfig.communitySummaryEnabled ? "translate-x-5" : "translate-x-0"
+                }`}
+              />
+            </button>
+          </div>
+
+          {draft.novelConfig.communitySummaryEnabled && (
+            <>
+              <div className="space-y-2">
+                <div className="flex items-center gap-1.5">
+                  <Label>{t("novel.settings.communitySummaryInterval")}</Label>
+                  {settingTooltip("communitySummaryIntervalHint")}
+                </div>
+                <Input
+                  type="number"
+                  min={1}
+                  max={50}
+                  value={draft.novelConfig.communitySummaryInterval}
+                  onChange={(e) => updateNovelConfig({
+                    communitySummaryInterval: Math.max(1, Math.min(50, Number(e.target.value) || 1)),
+                  })}
+                  className="w-24"
+                />
+              </div>
+
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-1.5">
+                  <Label>{t("novel.settings.communitySummaryAsync")}</Label>
+                  {settingTooltip("communitySummaryAsyncHint")}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => updateNovelConfig({ communitySummaryAsync: !draft.novelConfig.communitySummaryAsync })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
+                    draft.novelConfig.communitySummaryAsync ? "bg-primary" : "bg-input"
+                  }`}
+                >
+                  <span
+                    className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
+                      draft.novelConfig.communitySummaryAsync ? "translate-x-5" : "translate-x-0"
+                    }`}
+                  />
+                </button>
+              </div>
+            </>
+          )}
+
           {modelItems.map((item) => {
             const state = testStates[item.task]
+            const modelValue = draft.novelConfig[item.field] || ""
+            const isFollowingChat = !modelValue
+            const displayValue = isFollowingChat ? "" : modelValue
+
             return (
               <div key={item.task} className={item.wrapperClassName}>
                 <div className="flex items-center gap-1.5">
@@ -285,12 +413,27 @@ export function NovelSection({ draft, setDraft }: Props) {
                   {settingTooltip(`${item.field}Hint`)}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <ChatModelSelector
-                    value={draft.novelConfig[item.field] || aiChatModel || llmConfig.model || ""}
-                    onChange={(model) => updateNovelConfig({
-                      [item.field]: model === aiChatModel ? "" : model,
-                    } as Partial<NovelConfig>)}
-                  />
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => updateNovelConfig({
+                        [item.field]: "",
+                      } as Partial<NovelConfig>)}
+                      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
+                        isFollowingChat
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border hover:bg-accent"
+                      }`}
+                    >
+                      {t("novel.settings.followChatModel")}
+                    </button>
+                    <ChatModelSelector
+                      value={displayValue}
+                      onChange={(model) => updateNovelConfig({
+                        [item.field]: model,
+                      } as Partial<NovelConfig>)}
+                    />
+                  </div>
                   <Button
                     type="button"
                     size="sm"
@@ -325,11 +468,14 @@ export function NovelSection({ draft, setDraft }: Props) {
         </Label>
         <div className="grid gap-4 rounded-lg border p-4">
           <div className="space-y-2">
-            <Label>
-              {t("settings.sections.novel.feedbackWindow.lookbackChapterCount", {
-                defaultValue: "回溯章节数量",
-              })}
-            </Label>
+            <div className="flex items-center gap-1.5">
+              <Label>
+                {t("settings.sections.novel.feedbackWindow.lookbackChapterCount", {
+                  defaultValue: "回溯章节数量",
+                })}
+              </Label>
+              {settingTooltip("feedbackWindowLookbackChapterCountHelp")}
+            </div>
             <input
               type="number"
               min={0}
@@ -350,11 +496,14 @@ export function NovelSection({ draft, setDraft }: Props) {
 
           <div className="flex items-center justify-between gap-3">
             <div>
-              <Label>
-                {t("settings.sections.novel.feedbackWindow.currentChapterIncludeShouldImprove", {
-                  defaultValue: "包含当前章节改进建议",
-                })}
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label>
+                  {t("settings.sections.novel.feedbackWindow.currentChapterIncludeShouldImprove", {
+                    defaultValue: "包含当前章节改进建议",
+                  })}
+                </Label>
+                {settingTooltip("feedbackWindowCurrentChapterIncludeShouldImproveHelp")}
+              </div>
               <p className="text-xs text-muted-foreground">
                 {t("settings.sections.novel.feedbackWindow.currentChapterIncludeShouldImproveHint", {
                   defaultValue:
@@ -382,11 +531,14 @@ export function NovelSection({ draft, setDraft }: Props) {
 
           <div className="flex items-center justify-between gap-3">
             <div>
-              <Label>
-                {t("settings.sections.novel.feedbackWindow.previousChapterCarryEnabled", {
-                  defaultValue: "读取上一章延续事项",
-                })}
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label>
+                  {t("settings.sections.novel.feedbackWindow.previousChapterCarryEnabled", {
+                    defaultValue: "读取上一章延续事项",
+                  })}
+                </Label>
+                {settingTooltip("feedbackWindowPreviousChapterCarryEnabledHelp")}
+              </div>
               <p className="text-xs text-muted-foreground">
                 {t("settings.sections.novel.feedbackWindow.previousChapterCarryEnabledHint", {
                   defaultValue:
@@ -414,11 +566,14 @@ export function NovelSection({ draft, setDraft }: Props) {
 
           <div className="flex items-center justify-between gap-3">
             <div>
-              <Label>
-                {t("settings.sections.novel.feedbackWindow.lookbackIncludeMustFixOnly", {
-                  defaultValue: "回溯章节仅保留必须修复项",
-                })}
-              </Label>
+              <div className="flex items-center gap-1.5">
+                <Label>
+                  {t("settings.sections.novel.feedbackWindow.lookbackIncludeMustFixOnly", {
+                    defaultValue: "回溯章节仅保留必须修复项",
+                  })}
+                </Label>
+                {settingTooltip("feedbackWindowLookbackIncludeMustFixOnlyHelp")}
+              </div>
               <p className="text-xs text-muted-foreground">
                 {t("settings.sections.novel.feedbackWindow.lookbackIncludeMustFixOnlyHint", {
                   defaultValue:
@@ -443,32 +598,6 @@ export function NovelSection({ draft, setDraft }: Props) {
               />
             </button>
           </div>
-        </div>
-      </div>
-
-      <div className="space-y-2">
-        <Label>{t("novel.export.title")}</Label>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={async () => {
-              if (!project) return
-              setExportStatus(t("novel.export.exporting"))
-              const pp = normalizePath(project.path)
-              const exportPath = `${pp}/.novel/exports/${new Date().toISOString().slice(0, 10)}`
-              const result = await exportProject({ projectPath: pp, exportPath })
-              setExportStatus(result.success
-                ? t("novel.export.success", { count: result.chapterCount })
-                : t("novel.export.error", { message: result.message }))
-            }}
-            disabled={!project}
-          >
-            {t("novel.export.button")}
-          </Button>
-          {exportStatus ? (
-            <span className="text-xs text-muted-foreground">{exportStatus}</span>
-          ) : null}
         </div>
       </div>
       </div>

@@ -1,3 +1,4 @@
+pub mod server;
 mod clip_server;
 mod commands;
 mod panic_guard;

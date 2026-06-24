@@ -29,6 +29,27 @@
     "back": "Back",
     "next": "Next"
   },
+  "appLayout": {
+    "bookAnalysis": {
+      "closeNotification": "Close notification",
+      "extractingCharacters": "Extracting characters in the background",
+      "analyzingSixDimension": "Running deep extraction in the background",
+      "generatingSkills": "Generating Skills in the background",
+      "running": "Book analysis is running in the background",
+      "error": "Book analysis failed",
+      "completed": "Book analysis complete",
+      "processing": "Processing, please wait...",
+      "errorDescription": "An error occurred during analysis",
+      "completedDescription": "Character feature extraction is complete",
+      "viewResult": "View results",
+      "handleLater": "Later"
+    },
+    "usageGuidePrompt": {
+      "close": "Close usage guide prompt",
+      "title": "Need help using the app?",
+      "description": "Open the full tutorial, user manual, and novel feature guide."
+    }
+  },
   "sidebar": {
     "knowledge": "Chapters",
     "files": "Outlines",
@@ -737,6 +758,8 @@
         "apiKeyPlaceholderCustom": "Leave blank if no key is required (local model)",
         "apiKeyPlaceholder": "Enter API Key",
         "fetchModels": "Fetch Models",
+        "defaultLlmModel": "Default Model",
+        "defaultLlmModelHint": "The default model used by background tasks such as memory extraction and character extraction. If empty, the current AI chat model will be used.",
         "loadingModels": "Fetching...",
         "savedBadge": "Saved",
         "configuredBadge": "Configured",
@@ -747,6 +770,9 @@
         "toggleModelHint": "Click model tags to select/deselect",
         "selectedModels": "Selected models",
         "pleaseFetchModels": "Please fetch and select models first",
+        "testingModelProgress": "Testing model ({{current}}/{{total}}): {{model}}",
+        "testModelsAllSuccess": "All {{total}} models tested successfully",
+        "testModelsPartialFailed": "{{success}}/{{total}} models passed, failures: {{failed}}",
         "useModel": "Use {{model}}",
         "typeCustomModel": "Enter custom model ID",
         "customModel": "Custom...",
@@ -1150,8 +1176,8 @@
     },
     "settings": {
       "title": "Novel Writing Settings",
-      "recentSummaryWindow": "Recent Chapter Count Window",
-      "recentSummaryWindowHint": "Controls how many recent chapters are included directly in the writing context. Higher values preserve more recent plot continuity but use more context.",
+      "recentSummaryWindow": "Recent Chapter Text Window",
+      "recentSummaryWindowHint": "Controls how many recent chapters are included in the writing context. The system reads text excerpts from these chapters and combines them with chapter summaries to preserve continuity; higher values use more context.",
       "searchTopK": "Search Result Count",
       "searchTopKHint": "Controls how many relevant memory records are retrieved and injected into the writing context. Higher values add more references, but can add noise and consume context.",
       "contextTokenBudget": "Context Token Budget",
@@ -1163,6 +1189,12 @@
       "autoIngestOnSaveHint": "When enabled, saving a canon chapter automatically extracts characters, locations, events, relationships, and canon facts into the novel memory library for later search and continuation.",
       "reviewBeforeSave": "Auto-review before save",
       "reviewBeforeSaveHint": "When enabled, canon chapter saves first call the review model to check continuity, canon conflicts, and issues that should be fixed.",
+      "deepPreviousChaptersAnalysis": "Deep mode: prior-chapters analysis (extra call)",
+      "deepPreviousChaptersAnalysisHint": "When enabled, deep generation of chapter 2+ first reads and LLM-analyzes the full text of the previous chapters — stronger continuity, but one extra call per chapter and more tokens. When off, recent summaries and the previous chapter ending from the memory library are still injected. Off by default to save tokens.",
+      "deepChapterReview": "Deep mode: AI review & auto-revision",
+      "deepChapterReviewHint": "When enabled, deep generation reviews the draft and auto-revises blocking issues. When off, the draft goes straight to the light de-AI polish, saving the review and revision calls at the cost of one continuity gate. On by default.",
+      "reviewReasoningEffort": "Review thinking effort",
+      "reviewReasoningEffortHint": "Controls how deeply the AI review (including six-dimension review) reasons. Lower effort is cheaper and faster but weakens the continuity and canon-conflict gate. High by default.",
       "taskModelsTitle": "Task Model Routing",
       "taskModelsHint": "These are LLM models for writing, review, summary, and extraction, not vector embedding models. Empty fields use the current main model.",
       "writingModel": "Writing Model (empty = use default)",
@@ -1173,6 +1205,7 @@
       "summaryModelHint": "Used for chapter summaries, long-context compression, and preparing source material before writing. Defaults to the global LLM model.",
       "extractModel": "Extract Model (not embedding, empty = use default)",
       "extractModelHint": "Used for outline ingestion and chapter ingestion to extract characters, locations, events, relationships, and canon facts. Empty uses the current main LLM model; this is not a vector embedding model.",
+      "followChatModel": "Follow AI chat model",
       "fetchModels": "Fetch Models",
       "loadingModels": "Fetching...",
       "modelListSuccess": "Fetched {{count}} models.",
@@ -1187,7 +1220,14 @@
       "testSuccess": "Model test succeeded.",
       "testFailed": "Model test failed: {{message}}",
       "testUsingDefaultMainModel": "Using main model: {{model}}",
-      "testUsingCurrentModel": "Testing model: {{model}}"
+      "testUsingCurrentModel": "Testing model: {{model}}",
+      "communitySummaryEnabled": "Auto Community Summary",
+      "communitySummaryEnabledHint": "When enabled, an LLM generates narrative summaries for graph communities every N chapters, used to answer global questions (e.g., character factions, main relationship networks). Requires vector model to be enabled.",
+      "communitySummaryInterval": "Community Summary Interval",
+      "communitySummaryIntervalHint": "How many chapters to ingest before auto-rebuilding community summaries. Smaller values mean fresher summaries but more frequent LLM calls.",
+      "communitySummaryAsync": "Background Async Execution",
+      "communitySummaryAsyncHint": "When enabled, community summaries are generated in the background without blocking chapter ingestion. Disable to wait synchronously.",
+      "communitySummaryFailed": "Community summary generation failed: {{message}}. Will retry on next trigger."
     },
     "soul": {
       "projectSoul": "Project Soul",
@@ -1527,6 +1567,7 @@
       "recentRevisionDirectives": "## Recent Revision Directives",
       "requiredOutline": "## Required Outline",
       "recentPlotSummaries": "## Recent Plot Summaries",
+      "recentChapterContents": "## Recent Chapter Text Excerpts",
       "previousChapterEnding": "## Previous Chapter Ending",
       "characterStates": "## Current Character States",
       "characterAuras": "## 角色灵魂",

@@ -39,6 +39,7 @@ export async function addToRecentProjects(
 
 const LLM_CONFIG_KEY = "llmConfig"
 const AI_CHAT_MODEL_KEY = "aiChatModel"
+const DEFAULT_LLM_MODEL_KEY = "defaultLlmModel"
 const PROVIDER_CONFIGS_KEY = "providerConfigs"
 const ACTIVE_PRESET_KEY = "activePresetId"
 
@@ -60,6 +61,16 @@ export async function saveAiChatModel(model: string): Promise<void> {
 export async function loadAiChatModel(): Promise<string | null> {
   const store = await getStore()
   return (await store.get<string>(AI_CHAT_MODEL_KEY)) ?? null
+}
+
+export async function saveDefaultLlmModel(model: string): Promise<void> {
+  const store = await getStore()
+  await store.set(DEFAULT_LLM_MODEL_KEY, model)
+}
+
+export async function loadDefaultLlmModel(): Promise<string | null> {
+  const store = await getStore()
+  return (await store.get<string>(DEFAULT_LLM_MODEL_KEY)) ?? null
 }
 
 export async function saveProviderConfigs(configs: ProviderConfigs): Promise<void> {
@@ -620,10 +631,16 @@ function normalizeNovelConfig(
     autoIngestOnSave: config.autoIngestOnSave ?? DEFAULT_NOVEL_CONFIG.autoIngestOnSave,
     autoExtractOnImport: config.autoExtractOnImport ?? DEFAULT_NOVEL_CONFIG.autoExtractOnImport,
     reviewBeforeSave: config.reviewBeforeSave ?? DEFAULT_NOVEL_CONFIG.reviewBeforeSave,
+    deepPreviousChaptersAnalysis: config.deepPreviousChaptersAnalysis ?? DEFAULT_NOVEL_CONFIG.deepPreviousChaptersAnalysis,
+    deepChapterReview: config.deepChapterReview ?? DEFAULT_NOVEL_CONFIG.deepChapterReview,
+    reviewReasoningEffort: config.reviewReasoningEffort ?? DEFAULT_NOVEL_CONFIG.reviewReasoningEffort,
     writingModel: config.writingModel ?? DEFAULT_NOVEL_CONFIG.writingModel,
     reviewModel: config.reviewModel ?? DEFAULT_NOVEL_CONFIG.reviewModel,
     summaryModel: config.summaryModel ?? DEFAULT_NOVEL_CONFIG.summaryModel,
     extractModel: config.extractModel ?? DEFAULT_NOVEL_CONFIG.extractModel,
+    communitySummaryEnabled: config.communitySummaryEnabled ?? DEFAULT_NOVEL_CONFIG.communitySummaryEnabled,
+    communitySummaryInterval: Math.max(1, Math.min(50, config.communitySummaryInterval ?? DEFAULT_NOVEL_CONFIG.communitySummaryInterval)),
+    communitySummaryAsync: config.communitySummaryAsync ?? DEFAULT_NOVEL_CONFIG.communitySummaryAsync,
   }
 }
 

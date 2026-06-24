@@ -2,6 +2,7 @@ import { Suspense, lazy, useEffect, useCallback, useRef, useMemo, useState, useL
 import { useTranslation } from "react-i18next"
 import { Check, MoreHorizontal, X } from "lucide-react"
 import { useWikiStore } from "@/stores/wiki-store"
+import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 import type { FinalChapterSavePhase } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { deleteFile, fileExists, readFile, writeFile, listDirectory } from "@/commands/fs"
@@ -26,6 +27,7 @@ import { streamChat } from "@/lib/llm-client"
 import { makeChapterFileName, makeDefaultChapterTitle } from "@/lib/wiki-filename"
 import { getPreviewContentContainerClass, shouldUseCompactChapterToolbar } from "@/lib/workspace-layout"
 import { useOutlineGenerationStore, type OutlineGenerationTask } from "@/stores/outline-generation-store"
+import { useImportProgressStore } from "@/stores/import-progress-store"
 import {
   buildPolishSelectionMessages,
   rebuildChapterBody,
@@ -613,8 +615,24 @@ export function PreviewPanel() {
             await writeFile(targetPath, syncResult.markdown)
             await new Promise((resolve) => setTimeout(resolve, 100))
           }
+          const chapterTitle = chapterFrontmatter?.title || `第${chapterFrontmatter?.chapterNumber || '?'}章`
+          const ingestAbortController = new AbortController()
+          const ingestTaskId = useImportProgressStore.getState().startTask({
+            projectPath: project.path,
+            kind: "chapter",
+            total: 1,
+            currentTitle: String(chapterTitle),
+            message: "正在提取章节记忆",
+            abortController: ingestAbortController,
+          })
           const { ingestChapter } = await import("@/lib/novel/chapter-ingest")
-          const result = await ingestChapter(project.path, targetPath, resolveReviewModel())
+          const result = await ingestChapter(project.path, targetPath, resolveReviewModel(), ingestAbortController.signal)
+          useImportProgressStore.getState().finishTask(ingestTaskId, result.snapshot ? "done" : "error", {
+            completed: result.snapshot ? 1 : 0,
+            total: 1,
+            currentTitle: "",
+            message: result.snapshot ? `${chapterTitle} 提取完成` : `${chapterTitle} 提取失败`,
+          })
           if (result.snapshot) {
             updatePhase(false, "ingested", { chapter: result.snapshot.chapterNumber })
           } else if (result.failReason === "invalid_chapter_number") {
@@ -654,9 +672,25 @@ export function PreviewPanel() {
     setIsSavingFinal(true)
     updatePhase(true, "reingesting")
     setSaveStatus("")
+    const chapterTitle = chapterFrontmatter?.title || `第${chapterFrontmatter?.chapterNumber || '?'}章`
+    const ingestAbortController = new AbortController()
+    const ingestTaskId = useImportProgressStore.getState().startTask({
+      projectPath: projectPath,
+      kind: "chapter",
+      total: 1,
+      currentTitle: String(chapterTitle),
+      message: "正在重新提取章节记忆",
+      abortController: ingestAbortController,
+    })
     try {
       const { ingestChapter } = await import("@/lib/novel/chapter-ingest")
-      const result = await ingestChapter(projectPath, filePath, resolveReviewModel())
+      const result = await ingestChapter(projectPath, filePath, resolveReviewModel(), ingestAbortController.signal)
+      useImportProgressStore.getState().finishTask(ingestTaskId, result.snapshot ? "done" : "error", {
+        completed: result.snapshot ? 1 : 0,
+        total: 1,
+        currentTitle: "",
+        message: result.snapshot ? `${chapterTitle} 提取完成` : `${chapterTitle} 提取失败`,
+      })
       if (result.snapshot) {
         updatePhase(false, "ingested", { chapter: result.snapshot.chapterNumber })
       } else if (result.failReason === "invalid_chapter_number") {
@@ -666,6 +700,12 @@ export function PreviewPanel() {
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
+      useImportProgressStore.getState().finishTask(ingestTaskId, "error", {
+        completed: 0,
+        total: 1,
+        currentTitle: "",
+        message: `${chapterTitle} 提取失败`,
+      })
       updatePhase(false, "ingest_failed", { message: message.slice(0, 100) })
     } finally {
       setIsSavingFinal(false)
@@ -694,7 +734,7 @@ export function PreviewPanel() {
   const handleDeAiProcess = useCallback(async () => {
     if (!fileContent.trim()) return
     setDeAiProcessing(true)
-    const llmConfig = useWikiStore.getState().llmConfig
+    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
     if (!hasUsableLlm(llmConfig)) {
       setDeAiProcessing(false)
       return
@@ -758,7 +798,7 @@ export function PreviewPanel() {
 
   const handleSelectionAction = useCallback(async (action: ChapterSelectionAction, selection: ChapterBodySelection) => {
     if (!selection.text.trim()) return
-    const llmConfig = useWikiStore.getState().llmConfig
+    const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
     if (!hasUsableLlm(llmConfig)) {
       setSaveStatus("未配置可用的 AI 模型，无法处理选中文本")
       return

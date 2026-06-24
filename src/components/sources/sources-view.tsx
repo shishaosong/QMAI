@@ -1,12 +1,9 @@
-import { Suspense, lazy, useCallback, useMemo, useRef, useState } from "react"
-import { Loader2, Sparkles, MessageSquare } from "lucide-react"
+import { Suspense, lazy, useCallback, useRef, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { Button } from "@/components/ui/button"
 import { useWikiStore } from "@/stores/wiki-store"
-import { OutlineGeneratorDialog, type OutlineGeneratorMode } from "@/components/sources/outline-generator-dialog"
+import { OutlineActionToolbar } from "@/components/sources/outline-action-toolbar"
 import { PreviewPanel } from "@/components/layout/preview-panel"
 import { clampChatHeight, clampChatWidth } from "@/lib/workspace-layout"
-import { runBulkOutlineIngest } from "@/lib/novel/outline-generation"
 import { useOutlineGenerationStore } from "@/stores/outline-generation-store"
 
 const OutlineChatPanel = lazy(async () => {
@@ -16,32 +13,16 @@ const OutlineChatPanel = lazy(async () => {
 
 export function SourcesView() {
   const { t } = useTranslation()
-  const project = useWikiStore((s) => s.project)
   const novelMode = useWikiStore((s) => s.novelMode)
   const chatDockPosition = useWikiStore((s) => s.chatDockPosition)
-  const outlineTasks = useOutlineGenerationStore((s) => s.tasks)
-  const [outlineDialogOpen, setOutlineDialogOpen] = useState(false)
-  const [outlineDialogMode, setOutlineDialogMode] = useState<OutlineGeneratorMode>("outline")
-  const [outlineChatOpen, setOutlineChatOpen] = useState(false)
+  const outlineChatOpen = useOutlineGenerationStore((s) => s.panelOpen)
+  const setOutlineChatOpen = useOutlineGenerationStore((s) => s.setPanelOpen)
   const [chatHeight, setChatHeight] = useState(300)
   const [chatWidth, setChatWidth] = useState(360)
-  const [bulkIngestRunning, setBulkIngestRunning] = useState(false)
   const [bulkIngestResult, setBulkIngestResult] = useState<string | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const resizingRef = useRef(false)
   const horizontalResizingRef = useRef(false)
-  const bulkIngesting = useMemo(() => (
-    project != null && outlineTasks.some((task) => (
-      task.projectPath === project.path &&
-      task.kind === "ingest" &&
-      task.status === "ingesting"
-    ))
-  ), [outlineTasks, project])
-
-  function openOutlineDialog(mode: OutlineGeneratorMode) {
-    setOutlineDialogMode(mode)
-    setOutlineDialogOpen(true)
-  }
 
   const startResize = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
     event.preventDefault()
@@ -93,58 +74,16 @@ export function SourcesView() {
     document.addEventListener("mouseup", handleMouseUp)
   }, [])
 
-  const handleBulkIngest = useCallback(async () => {
-    if (!project || bulkIngestRunning || bulkIngesting) return
-    setBulkIngestRunning(true)
-    setBulkIngestResult(null)
-    try {
-      const result = await runBulkOutlineIngest(project.path)
-      if (result.total === 0) {
-        setBulkIngestResult(t("novel.outlineGenerator.bulkIngestEmpty"))
-      } else {
-        setBulkIngestResult(t("novel.outlineGenerator.bulkIngestResult", result))
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err)
-      setBulkIngestResult(t("novel.outlineGenerator.bulkIngestError", { message }))
-    } finally {
-      setBulkIngestRunning(false)
-    }
-  }, [bulkIngestRunning, bulkIngesting, project, t])
-
   return (
     <div ref={containerRef} className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
       <div className="flex items-center justify-between border-b px-4 py-3">
         <h2 className="text-sm font-semibold">{t(novelMode ? "novel.sources.title" : "sources.title")}</h2>
         <div className="flex flex-wrap gap-1">
           {novelMode ? (
-            <Button size="sm" onClick={() => openOutlineDialog("outline")}>
-              <Sparkles className="mr-1 h-4 w-4" />
-              {t("novel.outlineGenerator.title")}
-            </Button>
-          ) : null}
-          {novelMode ? (
-            <Button size="sm" variant="outline" onClick={() => setOutlineChatOpen(!outlineChatOpen)}>
-              <MessageSquare className="mr-1 h-4 w-4" />
-              AI大纲
-            </Button>
-          ) : null}
-          {novelMode ? (
-            <Button size="sm" variant="outline" onClick={() => openOutlineDialog("refine")}>
-              {t("novel.outlineGenerator.refineTitle")}
-            </Button>
-          ) : null}
-          {novelMode ? (
-            <Button size="sm" variant="outline" onClick={() => void handleBulkIngest()} disabled={bulkIngestRunning || bulkIngesting}>
-              {bulkIngestRunning || bulkIngesting ? (
-                <>
-                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                  {t("novel.outlineGenerator.bulkIngesting")}
-                </>
-              ) : (
-                t("novel.outlineGenerator.bulkIngest")
-              )}
-            </Button>
+            <OutlineActionToolbar
+              onBulkIngestResult={setBulkIngestResult}
+              onToggleOutlineChat={() => setOutlineChatOpen(!outlineChatOpen)}
+            />
           ) : null}
         </div>
       </div>
@@ -188,12 +127,6 @@ export function SourcesView() {
           </div>
         </>
       ) : null}
-
-      <OutlineGeneratorDialog
-        open={outlineDialogOpen}
-        onOpenChange={setOutlineDialogOpen}
-        mode={outlineDialogMode}
-      />
     </div>
   )
 }
