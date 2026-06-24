@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createClaudeCodeStreamParser } from "./claude-cli-transport"
+import { buildExitError, createClaudeCodeStreamParser } from "./claude-cli-transport"
 
 describe("createClaudeCodeStreamParser", () => {
   it("emits final result text when no assistant text event is present", () => {
@@ -68,5 +68,34 @@ describe("createClaudeCodeStreamParser", () => {
       subtype: "success",
       result: "visible text",
     }))).toBe("visible text")
+  })
+
+  it("does not treat CLI API errors as assistant text", () => {
+    const parse = createClaudeCodeStreamParser()
+
+    expect(parse(JSON.stringify({
+      type: "result",
+      subtype: "success",
+      is_error: true,
+      api_error_status: 504,
+      result: "API Error: 504 gateway timeout",
+    }))).toBeNull()
+  })
+
+  it("extracts structured stdout API errors for non-zero exits", () => {
+    const stdout = [
+      JSON.stringify({ type: "system", subtype: "init" }),
+      JSON.stringify({
+        type: "result",
+        subtype: "success",
+        is_error: true,
+        api_error_status: 504,
+        result: "API Error: 504 gateway timeout",
+      }),
+    ].join("\n")
+
+    expect(buildExitError(1, "", stdout)).toBe(
+      "claude CLI failed with code 1: API Error: 504 gateway timeout",
+    )
   })
 })

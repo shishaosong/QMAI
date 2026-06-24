@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next"
 import { Plus, Edit, Trash2, Check, X, Download, TestTube } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { toast } from "@/lib/toast"
@@ -295,9 +296,8 @@ export function SavedModelsManager({ savedModels, onChange }: SavedModelsManager
               <Label htmlFor="model-api-key">
                 {t("settings.sections.llm.savedModels.apiKey")}
               </Label>
-              <Input
+              <SecretInput
                 id="model-api-key"
-                type="password"
                 value={formData.apiKey}
                 onChange={(e) => setFormData({ ...formData, apiKey: e.target.value })}
                 placeholder={t("settings.sections.llm.savedModels.apiKeyPlaceholder")}

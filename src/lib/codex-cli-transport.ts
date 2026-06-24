@@ -84,6 +84,15 @@ export function parseCodexCliLine(rawLine: string): string | null {
   return null
 }
 
+export function parseLastCodexCliAssistantText(rawOutput: string): string | null {
+  let lastText: string | null = null
+  for (const line of rawOutput.split(/\r?\n/)) {
+    const text = parseCodexCliLine(line)
+    if (text !== null) lastText = text
+  }
+  return lastText
+}
+
 export function extractCodexCliError(rawOutput: string): string {
   let lastError = ""
   for (const line of rawOutput.split(/\r?\n/)) {
@@ -173,7 +182,7 @@ export async function streamCodexCli(
   let unlistenDone: UnlistenFn | undefined
   let finished = false
   let aborted = signal?.aborted ?? false
-  let emittedAgentMessage = false
+  let lastAgentMessage: string | null = null
   let resolveCompletion: () => void = () => {}
   const completion = new Promise<void>((resolve) => {
     resolveCompletion = resolve
@@ -211,19 +220,16 @@ export async function streamCodexCli(
     }
     if (!nextText) return
     emittedText += nextText
-    emittedAgentMessage = true
     onToken(nextText)
   }
 
-  const replayAgentMessagesFromStdout = (stdout: string | undefined) => {
-    if (!stdout) return
-
-    for (const line of stdout.split(/\r?\n/)) {
-      const token = parseCodexCliLine(line)
-      if (token !== null) {
-        emitCodexText(token)
-      }
+  const captureCodexText = (line: string) => {
+    const token = parseCodexCliLine(line)
+    if (token !== null) {
+      lastAgentMessage = token
+      return
     }
+    captureUnparsed(line)
   }
 
   const signalTimedOut = () => {
@@ -252,12 +258,7 @@ export async function streamCodexCli(
 
   try {
     unlistenData = await listen<string>(`codex-cli:${streamId}`, (event) => {
-      const token = parseCodexCliLine(event.payload)
-      if (token !== null) {
-        emitCodexText(token)
-      } else {
-        captureUnparsed(event.payload)
-      }
+      captureCodexText(event.payload)
     })
     if (aborted || finished) {
       cleanup()
@@ -280,8 +281,11 @@ export async function streamCodexCli(
             )),
           )
         } else {
-          if (!emittedAgentMessage) replayAgentMessagesFromStdout(stdout)
-          if (!emittedAgentMessage) {
+          const finalText = lastAgentMessage ?? parseLastCodexCliAssistantText(stdout)
+          if (finalText) {
+            emitCodexText(finalText)
+          }
+          if (!emittedText.trim()) {
             const details = stdout.trim() || unparsedLines.join("\n").trim()
             finishWith(() =>
               onError(new Error(

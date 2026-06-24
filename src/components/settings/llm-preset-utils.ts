@@ -31,12 +31,23 @@ export function getCustomLlmProfileIds(configs: ProviderConfigs): string[] {
     })
 }
 
+export function getCustomProviderConfigIds(configs: ProviderConfigs): string[] {
+  return Object.keys(configs)
+    .filter(isCustomProviderConfigId)
+    .sort((a, b) => {
+      const aTime = configs[a]?.createdAt ?? 0
+      const bTime = configs[b]?.createdAt ?? 0
+      if (aTime !== bTime) return aTime - bTime
+      return a.localeCompare(b)
+    })
+}
+
 export function isMissingLlmProfileTranslationKey(value: string): boolean {
   return value.startsWith("settings.sections.llm.")
 }
 
 export function getCustomLlmProfileLabel(override: ProviderOverride | undefined, index = 0): string {
-  const name = override?.name?.trim() ?? ""
+  const name = override?.name?.trim() || override?.label?.trim() || ""
   if (name && !isMissingLlmProfileTranslationKey(name)) return name
   return `自定义模型 ${index + 2}`
 }
@@ -72,9 +83,65 @@ export function getLlmPresetById(
   if (!id) return undefined
   const staticPreset = LLM_PRESETS.find((preset) => preset.id === id)
   if (staticPreset) return staticPreset
-  if (isCustomLlmProfileId(id)) {
-    const index = getCustomLlmProfileIds(configs).indexOf(id)
+  if (isCustomProviderConfigId(id)) {
+    const index = getCustomProviderConfigIds(configs).indexOf(id)
     return buildCustomLlmProfilePreset(id, configs[id], index >= 0 ? index : 0)
   }
   return undefined
+}
+
+export function isProviderConfigEnabled(override: ProviderOverride | undefined): boolean {
+  return override?.enabled !== false
+}
+
+export function getPrimaryProviderModel(
+  override: ProviderOverride | undefined,
+  fallbackModel = "",
+): string {
+  const savedModel = (override?.savedModels ?? [])
+    .map((item) => item.model.trim())
+    .find(Boolean)
+  const overrideModel = override?.model?.trim()
+  return savedModel ?? (overrideModel || fallbackModel.trim())
+}
+
+export function buildProviderModelRef(
+  providerId: string | null,
+  override: ProviderOverride | undefined,
+  fallbackModel = "",
+): string {
+  if (!providerId) return ""
+  const model = getPrimaryProviderModel(override, fallbackModel)
+  return model ? `${providerId}/${model}` : ""
+}
+
+export function providerConfigHasModel(
+  override: ProviderOverride | undefined,
+  modelId: string,
+): boolean {
+  const model = modelId.trim()
+  if (!model || !isProviderConfigEnabled(override)) return false
+  if ((override?.savedModels ?? []).some((item) => item.model.trim() === model)) {
+    return true
+  }
+  return override?.model?.trim() === model
+}
+
+export function isKnownProviderModelRef(
+  value: string,
+  configs: ProviderConfigs,
+): boolean {
+  const target = value.trim()
+  if (!target) return false
+
+  const slashIdx = target.indexOf("/")
+  if (slashIdx > 0) {
+    const providerId = target.slice(0, slashIdx)
+    const modelId = target.slice(slashIdx + 1)
+    return providerConfigHasModel(configs[providerId], modelId)
+  }
+
+  return Object.values(configs).some((override) =>
+    providerConfigHasModel(override, target),
+  )
 }

@@ -3,6 +3,7 @@ import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight } from "lucide-rea
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore } from "@/stores/wiki-store"
 import { fetchRerankModelList } from "@/lib/settings-model-list"
@@ -330,8 +331,7 @@ export function RerankSection({ draft, setDraft }: Props) {
                 {needsApiKey && (
                   <div className="space-y-2">
                     <Label>{t("settings.sections.rerank.apiKey")}</Label>
-                    <Input
-                      type="password"
+                    <SecretInput
                       value={config.apiKey}
                       onChange={(e) => updateRerankConfig({ apiKey: e.target.value })}
                       placeholder={t("settings.sections.rerank.apiKeyPlaceholder")}

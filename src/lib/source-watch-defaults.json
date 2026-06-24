@@ -41,6 +41,7 @@
     ".obsidian",
     ".idea",
     ".vscode",
+    ".qmai-codex-prompts",
     "node_modules",
     ".cache",
     "__pycache__"

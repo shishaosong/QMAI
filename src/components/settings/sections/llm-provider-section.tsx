@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, XCircle 
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type ReasoningConfig, type ReasoningMode, type SavedModel } from "@/stores/wiki-store"
 import { LLM_PRESETS, type LlmPreset } from "../llm-presets"
@@ -17,7 +18,7 @@ import { testSettingsLlmModel } from "@/lib/settings-model-test"
 import { ModelSelectInput } from "../model-select-input"
 import { SavedModelsManager } from "./saved-models-manager"
 import { CustomProviderCards } from "./custom-provider-cards"
-import { getLlmPresetById } from "../llm-preset-utils"
+import { buildProviderModelRef, getLlmPresetById } from "../llm-preset-utils"
 
 export function LlmProviderSection() {
   const { t } = useTranslation()
@@ -26,6 +27,7 @@ export function LlmProviderSection() {
   const activePresetId = useWikiStore((s) => s.activePresetId)
   const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
   const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
+  const setAiChatModel = useWikiStore((s) => s.setAiChatModel)
   const llmConfig = useWikiStore((s) => s.llmConfig)
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -36,7 +38,7 @@ export function LlmProviderSection() {
   }
 
   async function persist(newConfigs: typeof providerConfigs, newActive: string | null) {
-    const { saveProviderConfigs, saveActivePresetId, saveLlmConfig } = await import(
+    const { saveProviderConfigs, saveActivePresetId, saveLlmConfig, saveAiChatModel } = await import(
       "@/lib/project-store"
     )
     await saveProviderConfigs(newConfigs)
@@ -44,10 +46,19 @@ export function LlmProviderSection() {
     if (newActive) {
       const preset = getLlmPresetById(newActive, newConfigs)
       if (preset) {
-        const resolved = resolveConfig(preset, newConfigs[newActive], llmConfig)
+        const override = newConfigs[newActive]
+        const resolved = resolveConfig(preset, override, llmConfig)
+        const chatModelRef = buildProviderModelRef(newActive, override, resolved.model)
         setLlmConfig(resolved)
+        if (chatModelRef) {
+          setAiChatModel(chatModelRef)
+          await saveAiChatModel(chatModelRef)
+        }
         await saveLlmConfig(resolved)
       }
+    } else {
+      setAiChatModel("")
+      await saveAiChatModel("")
     }
   }
 
@@ -521,8 +532,7 @@ function PresetRow({
           {needsApiKey && (
             <div className="space-y-2">
               <Label>{t("settings.sections.llm.apiKey")}</Label>
-              <Input
-                type="password"
+              <SecretInput
                 value={apiKey}
                 onChange={(e) => onChange({ apiKey: e.target.value })}
                 placeholder={

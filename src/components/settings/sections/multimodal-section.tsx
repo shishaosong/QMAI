@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import type { SettingsDraft, DraftSetter } from "../settings-types"
 
@@ -193,8 +194,7 @@ export function MultimodalSection({ draft, setDraft }: Props) {
 
               <div className="space-y-2">
                 <Label>{t("settings.sections.multimodal.apiKey", "API key")}</Label>
-                <Input
-                  type="password"
+                <SecretInput
                   value={draft.multimodalApiKey}
                   onChange={(e) => setDraft("multimodalApiKey", e.target.value)}
                   placeholder={t(

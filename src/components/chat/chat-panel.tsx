@@ -28,10 +28,10 @@ import { computeContextBudget } from "@/lib/context-budget"
 import { getConversationTabTitle, sortConversationsByUpdatedAt } from "@/lib/workspace-layout"
 import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
 import { createDeepThinkingStreamRenderer } from "@/lib/deep-thinking-stream"
-import { resolveNovelModel } from "@/lib/novel/model-resolver"
+import { resolveKnownModelConfig, resolveNovelModel } from "@/lib/novel/model-resolver"
+import { saveActivePresetId, saveAiChatModel, saveLlmConfig } from "@/lib/project-store"
 import { resolveConfig } from "@/components/settings/preset-resolver"
-import { LLM_PRESETS } from "@/components/settings/llm-presets"
-import { saveAiChatModel } from "@/lib/project-store"
+import { getLlmPresetById } from "@/components/settings/llm-preset-utils"
 import {
   buildGoldenThreeChapterDirective,
   detectGoldenThreeChapterRequest,
@@ -194,6 +194,8 @@ export function ChatPanel() {
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const aiChatModel = useWikiStore((s) => s.aiChatModel)
   const setAiChatModel = useWikiStore((s) => s.setAiChatModel)
+  const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
+  const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
   const chatEditModeEnabled = useWikiStore((s) => s.chatEditModeEnabled)
   const setChatEditModeEnabled = useWikiStore((s) => s.setChatEditModeEnabled)
   const selectedFile = useWikiStore((s) => s.selectedFile)
@@ -206,6 +208,26 @@ export function ChatPanel() {
   const soulDialogResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const userScrolledUpRef = useRef(false)
   const lastScrollTopRef = useRef(0)
+
+  function handleChatModelChange(modelRef: string) {
+    setAiChatModel(modelRef)
+    void saveAiChatModel(modelRef)
+
+    const slashIdx = modelRef.indexOf("/")
+    if (slashIdx <= 0) return
+
+    const providerId = modelRef.slice(0, slashIdx)
+    const modelId = modelRef.slice(slashIdx + 1)
+    const override = providerConfigs[providerId]
+    const preset = getLlmPresetById(providerId, providerConfigs)
+    if (!preset || !override || override.enabled === false) return
+
+    const resolved = { ...resolveConfig(preset, override, llmConfig), model: modelId }
+    setActivePresetId(providerId)
+    setLlmConfig(resolved)
+    void saveActivePresetId(providerId)
+    void saveLlmConfig(resolved)
+  }
 
   const [chapterSaveStatus, setChapterSaveStatus] = useState<string>("")
   const [isSavingChapter, setIsSavingChapter] = useState(false)
@@ -381,51 +403,8 @@ export function ChatPanel() {
       // AI 会话选中的 model 名（如 "deepseek-v3"）需要找到它所属的 provider
       // 重新计算 baseUrl/apiKey/apiMode，否则会沿用 activePresetId 的配置
       // 导致跨 provider 调用失败
-      let effectiveChatLlmConfig = llmConfig
-      if (aiChatModel.trim()) {
-        const targetModel = aiChatModel.trim()
-        // 优先按 "providerId/modelId" 格式精确匹配
-        const slashIdx = targetModel.indexOf("/")
-        if (slashIdx > 0) {
-          const providerId = targetModel.slice(0, slashIdx)
-          const modelId = targetModel.slice(slashIdx + 1)
-          const override = providerConfigs[providerId]
-          if (override?.savedModels?.some((m) => m.model === modelId)) {
-            const template =
-              LLM_PRESETS.find((p) => p.id === providerId) ??
-              LLM_PRESETS.find((p) => p.id === "custom")
-            if (template) {
-              effectiveChatLlmConfig = {
-                ...resolveConfig(template, override, llmConfig),
-                model: modelId,
-              }
-            }
-          } else {
-            effectiveChatLlmConfig = { ...llmConfig, model: modelId }
-          }
-        } else {
-          // 回退：按纯模型名匹配（兼容旧数据）
-          let matched = false
-          for (const [providerId, override] of Object.entries(providerConfigs)) {
-            if (override.savedModels?.some((m) => m.model === targetModel)) {
-              const template =
-                LLM_PRESETS.find((p) => p.id === providerId) ??
-                LLM_PRESETS.find((p) => p.id === "custom")
-              if (template) {
-                effectiveChatLlmConfig = {
-                  ...resolveConfig(template, override, llmConfig),
-                  model: targetModel,
-                }
-              }
-              matched = true
-              break
-            }
-          }
-          if (!matched) {
-            effectiveChatLlmConfig = { ...llmConfig, model: targetModel }
-          }
-        }
-      }
+      const effectiveChatLlmConfig =
+        resolveKnownModelConfig(aiChatModel, llmConfig, providerConfigs) ?? llmConfig
       const shouldUseEditMode = novelMode && chatEditModeEnabled && isChatEditRequest(text)
       const goldenThreeChapter = novelMode
         ? detectGoldenThreeChapterRequest(text, effectiveTaskRoute?.chapterNumber)
@@ -1430,10 +1409,7 @@ export function ChatPanel() {
                   <div className="flex items-center gap-2 flex-nowrap">
                     <ChatModelSelector
                       value={aiChatModel}
-                      onChange={(model) => {
-                        setAiChatModel(model)
-                        void saveAiChatModel(model)
-                      }}
+                      onChange={handleChatModelChange}
                     />
                   </div>
                 </div>

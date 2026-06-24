@@ -14,7 +14,7 @@ vi.mock("@/stores/wiki-store", () => ({
   },
 }))
 
-import { parseCodexCliLine } from "./codex-cli-transport"
+import { parseCodexCliLine, parseLastCodexCliAssistantText } from "./codex-cli-transport"
 
 describe("parseCodexCliLine", () => {
   it("parses legacy agent_message completion events", () => {
@@ -59,5 +59,28 @@ describe("parseCodexCliLine", () => {
         content: [{ type: "input_text", text: "不要输出这个" }],
       },
     }))).toBeNull()
+  })
+
+  it("uses the final assistant message when Codex emits tool preambles", () => {
+    const output = [
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "I am opening the prompt file." },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: {
+          type: "command_execution",
+          command: "Get-Content prompt.txt",
+          status: "completed",
+        },
+      }),
+      JSON.stringify({
+        type: "item.completed",
+        item: { type: "agent_message", text: "OK" },
+      }),
+    ].join("\n")
+
+    expect(parseLastCodexCliAssistantText(output)).toBe("OK")
   })
 })

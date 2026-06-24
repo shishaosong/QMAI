@@ -92,7 +92,12 @@ export function createClaudeCodeStreamParser() {
       return emitNovelText(text)
     }
 
-    if (type === "result" && obj.subtype === "success" && typeof obj.result === "string") {
+    if (
+      type === "result" &&
+      obj.subtype === "success" &&
+      obj.is_error !== true &&
+      typeof obj.result === "string"
+    ) {
       return emitNovelText(obj.result)
     }
 
@@ -330,6 +335,10 @@ export function buildExitError(
   if (stderr) {
     return `claude CLI exited with code ${code}: ${stderr}`
   }
+  const stdoutError = extractClaudeCodeCliError(unparsedStdout)
+  if (stdoutError) {
+    return `claude CLI failed with code ${code}: ${stdoutError}`
+  }
   if (unparsedStdout.trim()) {
     return [
       `claude CLI exited with code ${code} (no stderr).`,
@@ -344,4 +353,34 @@ export function buildExitError(
     "terminal with the same prompt to see what's wrong, or switch to",
     "the official Anthropic API in Settings.",
   ].join(" ")
+}
+
+export function extractClaudeCodeCliError(rawOutput: string): string {
+  for (const line of rawOutput.split(/\r?\n/).reverse()) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    try {
+      const parsed = JSON.parse(trimmed) as {
+        type?: string
+        is_error?: boolean
+        result?: unknown
+        message?: unknown
+        error?: unknown
+      }
+      if (parsed.type === "result" && parsed.is_error === true && typeof parsed.result === "string") {
+        return parsed.result
+      }
+      if (parsed.type === "error") {
+        if (typeof parsed.message === "string") return parsed.message
+        if (typeof parsed.error === "string") return parsed.error
+        if (parsed.error && typeof parsed.error === "object") {
+          const errorObj = parsed.error as Record<string, unknown>
+          if (typeof errorObj.message === "string") return errorObj.message
+        }
+      }
+    } catch {
+      // Keep scanning older lines.
+    }
+  }
+  return ""
 }

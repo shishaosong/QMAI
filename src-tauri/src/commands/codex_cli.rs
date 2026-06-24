@@ -15,7 +15,8 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::fs;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -49,6 +50,7 @@ const MIN_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 1;
 const MAX_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 240;
 const STDERR_LIMIT_BYTES: usize = 1024 * 1024;
 const STDOUT_LIMIT_BYTES: usize = 1024 * 1024;
+const CODEX_PROMPT_DIR: &str = ".qmai/codex-prompts";
 
 fn append_capped_line(collected: &mut String, line: &str, limit_bytes: usize) {
     if collected.len() >= limit_bytes {
@@ -67,6 +69,54 @@ fn append_capped_line(collected: &mut String, line: &str, limit_bytes: usize) {
 
 async fn find_codex_command() -> Result<PathBuf, String> {
     find_cli_command("codex", &["codex.cmd", "codex.exe"]).await
+}
+
+fn safe_prompt_file_stem(stream_id: &str) -> String {
+    let stem: String = stream_id
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if stem.is_empty() {
+        "prompt".to_string()
+    } else {
+        stem
+    }
+}
+
+async fn write_codex_prompt_file(
+    project_dir: Option<&Path>,
+    stream_id: &str,
+    prompt: &str,
+) -> Result<PathBuf, String> {
+    let base_dir = match project_dir {
+        Some(dir) => dir.to_path_buf(),
+        None => std::env::current_dir()
+            .map_err(|error| format!("Failed to resolve current directory: {error}"))?,
+    };
+    let prompt_dir = base_dir.join(CODEX_PROMPT_DIR);
+    fs::create_dir_all(&prompt_dir)
+        .await
+        .map_err(|error| {
+            format!(
+                "Failed to create Codex prompt directory '{}': {error}",
+                prompt_dir.display()
+            )
+        })?;
+
+    let path = prompt_dir.join(format!("{}.txt", safe_prompt_file_stem(stream_id)));
+    fs::write(&path, prompt).await.map_err(|error| {
+        format!(
+            "Failed to write Codex prompt file '{}': {error}",
+            path.display()
+        )
+    })?;
+    Ok(path)
 }
 
 fn suppress_windows_console(_cmd: &mut Command) {
@@ -209,6 +259,7 @@ pub async fn codex_cli_spawn(
 
     let codex = find_codex_command().await?;
     let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
+    let prompt_file = write_codex_prompt_file(project_dir.as_deref(), &stream_id, &prompt).await?;
     let mut cmd = Command::new(&codex);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
@@ -225,21 +276,21 @@ pub async fn codex_cli_spawn(
         &model,
         isolate_local_config,
         project_dir.as_deref(),
+        &prompt_file,
     ));
 
-    cmd.stdin(Stdio::piped())
+    cmd.stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = cmd
-        .spawn()
-        .map_err(|e| format!("Failed to spawn codex: {e}"))?;
-
-    let mut stdin = child
-        .stdin
-        .take()
-        .ok_or_else(|| "Missing stdin handle".to_string())?;
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(error) => {
+            let _ = fs::remove_file(&prompt_file).await;
+            return Err(format!("Failed to spawn codex: {error}"));
+        }
+    };
     let stdout = child
         .stdout
         .take()
@@ -248,16 +299,6 @@ pub async fn codex_cli_spawn(
         .stderr
         .take()
         .ok_or_else(|| "Missing stderr handle".to_string())?;
-
-    stdin
-        .write_all(prompt.as_bytes())
-        .await
-        .map_err(|e| format!("Failed to write to codex stdin: {e}"))?;
-    stdin
-        .flush()
-        .await
-        .map_err(|e| format!("Failed to flush codex stdin: {e}"))?;
-    drop(stdin);
 
     state.children.lock().await.insert(stream_id.clone(), child);
 
@@ -270,6 +311,7 @@ pub async fn codex_cli_spawn(
     let timeout_duration = Duration::from_secs(timeout_minutes * 60);
     let app_for_task = app.clone();
     let stream_id_task = stream_id.clone();
+    let prompt_file_task = prompt_file.clone();
     let topic = format!("codex-cli:{stream_id}");
     let done_topic = format!("codex-cli:{stream_id}:done");
 
@@ -321,6 +363,7 @@ pub async fn codex_cli_spawn(
         } else {
             None
         };
+        let _ = fs::remove_file(&prompt_file_task).await;
 
         let mut stderr_text = stderr_task.await.unwrap_or_default();
         if timed_out.load(Ordering::SeqCst) {
@@ -392,6 +435,7 @@ fn build_codex_cli_args(
     model: &str,
     isolate_local_config: bool,
     project_dir: Option<&Path>,
+    prompt_file: &Path,
 ) -> Vec<String> {
     let mut args = vec!["-a".to_string(), "never".to_string(), "exec".to_string()];
 
@@ -416,7 +460,10 @@ fn build_codex_cli_args(
     if !model.trim().is_empty() {
         args.extend(["--model".to_string(), model.to_string()]);
     }
-    args.push("-".to_string());
+    args.push(format!(
+        "Read the complete user request from this UTF-8 text file and follow it exactly. Return only the final answer unless the file asks otherwise: {}",
+        prompt_file.display()
+    ));
     args
 }
 
@@ -485,7 +532,7 @@ mod tests {
 
     #[test]
     fn codex_args_do_not_isolate_local_config_by_default() {
-        let args = build_codex_cli_args("gpt-5", false, None);
+        let args = build_codex_cli_args("gpt-5", false, None, Path::new("prompt.txt"));
 
         assert!(args
             .windows(3)
@@ -498,7 +545,7 @@ mod tests {
 
     #[test]
     fn codex_args_can_isolate_user_config_and_rules() {
-        let args = build_codex_cli_args("gpt-5", true, None);
+        let args = build_codex_cli_args("gpt-5", true, None, Path::new("prompt.txt"));
         let exec_pos = args.iter().position(|arg| arg == "exec").expect("exec arg");
         let ignore_config_pos = args
             .iter()
@@ -515,7 +562,7 @@ mod tests {
 
     #[test]
     fn codex_args_do_not_isolate_user_api_key_by_default() {
-        let args = build_codex_cli_args("gpt-5", false, None);
+        let args = build_codex_cli_args("gpt-5", false, None, Path::new("prompt.txt"));
 
         assert!(!args.contains(&"--ignore-user-config".to_string()));
         assert!(!args.contains(&"--ignore-rules".to_string()));
@@ -523,9 +570,12 @@ mod tests {
 
     #[test]
     fn codex_args_skip_model_flag_when_model_is_empty() {
-        let args = build_codex_cli_args("", false, None);
+        let args = build_codex_cli_args("", false, None, Path::new("prompt.txt"));
         assert!(!args.contains(&"--model".to_string()));
-        assert_eq!(args.last().map(String::as_str), Some("-"));
+        assert_ne!(args.last().map(String::as_str), Some("-"));
+        assert!(args
+            .last()
+            .is_some_and(|arg| arg.contains("prompt.txt") && arg.contains("Read the complete user request")));
     }
 
     #[test]
@@ -541,7 +591,7 @@ mod tests {
     #[test]
     fn codex_args_use_current_project_directory() {
         let dir = Path::new("novel-project");
-        let args = build_codex_cli_args("gpt-5", false, Some(dir));
+        let args = build_codex_cli_args("gpt-5", false, Some(dir), Path::new("prompt.txt"));
 
         assert!(args
             .windows(2)

@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { Plus, Trash2, ChevronDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type SavedModel, type ReasoningConfig } from "@/stores/wiki-store"
 import { ContextSizeSelector } from "../context-size-selector"
@@ -10,7 +11,7 @@ import { fetchLlmModelList } from "@/lib/settings-model-list"
 import { testSettingsLlmModel } from "@/lib/settings-model-test"
 import { useTranslation } from "react-i18next"
 import { ReasoningControls } from "./llm-provider-section"
-import { isCustomProviderConfigId } from "../llm-preset-utils"
+import { buildProviderModelRef, getLlmPresetById, isCustomProviderConfigId } from "../llm-preset-utils"
 
 interface CustomProviderCard {
   id: string
@@ -30,6 +31,9 @@ export function CustomProviderCards() {
   const setProviderConfigs = useWikiStore((s) => s.setProviderConfigs)
   const activePresetId = useWikiStore((s) => s.activePresetId)
   const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
+  const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
+  const setAiChatModel = useWikiStore((s) => s.setAiChatModel)
+  const llmConfig = useWikiStore((s) => s.llmConfig)
 
   // Load existing custom provider configs as cards
   const [cards, setCards] = useState<CustomProviderCard[]>(() => {
@@ -85,6 +89,34 @@ export function CustomProviderCards() {
     persistConfigs(newConfigs)
   }
 
+  async function persistActiveSelection(
+    id: string | null,
+    newConfigs: typeof providerConfigs,
+  ) {
+    const { saveActivePresetId, saveLlmConfig, saveAiChatModel } = await import("@/lib/project-store")
+    setActivePresetId(id)
+    await saveActivePresetId(id)
+
+    if (!id) {
+      setAiChatModel("")
+      await saveAiChatModel("")
+      return
+    }
+
+    const preset = getLlmPresetById(id, newConfigs)
+    const override = newConfigs[id]
+    if (!preset || !override || override.enabled === false) return
+
+    const resolved = resolveConfig(preset, override, llmConfig)
+    const chatModelRef = buildProviderModelRef(id, override, resolved.model)
+    setLlmConfig(resolved)
+    await saveLlmConfig(resolved)
+    if (chatModelRef) {
+      setAiChatModel(chatModelRef)
+      await saveAiChatModel(chatModelRef)
+    }
+  }
+
   function updateCard(id: string, updates: Partial<CustomProviderCard>) {
     setCards(cards.map((c) => (c.id === id ? { ...c, ...updates } : c)))
 
@@ -109,6 +141,14 @@ export function CustomProviderCards() {
     }
     setProviderConfigs(newConfigs)
     persistConfigs(newConfigs)
+    if (activePresetId === id && updatedConfig.enabled !== false) {
+      persistActiveSelection(id, newConfigs).catch(() => {})
+    }
+    if (updates.enabled === true) {
+      persistActiveSelection(id, newConfigs).catch(() => {})
+    } else if (updates.enabled === false && activePresetId === id) {
+      persistActiveSelection(null, newConfigs).catch(() => {})
+    }
   }
 
   function deleteCard(id: string) {
@@ -123,8 +163,7 @@ export function CustomProviderCards() {
 
     // If this was active, deactivate
     if (activePresetId === id) {
-      setActivePresetId(null)
-      persistActiveId(null)
+      persistActiveSelection(null, newConfigs).catch(() => {})
     }
 
     persistConfigs(newConfigs)
@@ -139,11 +178,6 @@ export function CustomProviderCards() {
   async function persistConfigs(newConfigs: typeof providerConfigs) {
     const { saveProviderConfigs } = await import("@/lib/project-store")
     await saveProviderConfigs(newConfigs)
-  }
-
-  async function persistActiveId(id: string | null) {
-    const { saveActivePresetId } = await import("@/lib/project-store")
-    await saveActivePresetId(id)
   }
 
   return (
@@ -478,9 +512,8 @@ function CustomProviderCardItem({
             <Label htmlFor={`${card.id}-key`} className="text-xs">
               API 密钥
             </Label>
-            <Input
+            <SecretInput
               id={`${card.id}-key`}
-              type="password"
               value={card.apiKey}
               onChange={(e) => onUpdate({ apiKey: e.target.value })}
               placeholder="sk-..."

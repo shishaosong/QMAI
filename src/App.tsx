@@ -5,7 +5,7 @@ import { useReviewStore } from "@/stores/review-store"
 import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { listDirectory, openProject, fileExists } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId } from "@/lib/project-store"
+import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId, saveAiChatModel } from "@/lib/project-store"
 import { loadNovelProjectMeta } from "@/lib/novel/project-meta"
 import { loadReviewItems, loadChatHistory } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
@@ -19,7 +19,7 @@ import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 import { formatAppTitle } from "@/lib/app-title"
 import { resetProjectState, resetProjectStores } from "@/lib/reset-project-state"
 import { resolveConfig } from "@/components/settings/preset-resolver"
-import { getLlmPresetById } from "@/components/settings/llm-preset-utils"
+import { buildProviderModelRef, getLlmPresetById, isKnownProviderModelRef } from "@/components/settings/llm-preset-utils"
 import { loadEnvLlmDefault } from "@/lib/env-llm-defaults"
 import type { WikiProject } from "@/types/wiki"
 
@@ -97,6 +97,13 @@ function App() {
             const resolved = resolveConfig(preset, override, currentFallback)
             useWikiStore.getState().setLlmConfig(resolved)
             await saveLlmConfig(resolved)
+
+            const activeModelRef = buildProviderModelRef(savedActivePreset, override, resolved.model)
+            const currentAiChatModel = useWikiStore.getState().aiChatModel
+            if (activeModelRef && !isKnownProviderModelRef(currentAiChatModel, savedProviderConfigs ?? {})) {
+              useWikiStore.getState().setAiChatModel(activeModelRef)
+              await saveAiChatModel(activeModelRef)
+            }
           }
         } else if (envLlmDefault) {
           useWikiStore.getState().setActivePresetId(envLlmDefault.activePresetId)

@@ -3,9 +3,11 @@ import type { LlmConfig, ProviderConfigs } from "@/stores/wiki-store"
 import { getProviderConfig } from "@/lib/llm-providers"
 import {
   CUSTOM_LLM_PROFILE_PREFIX,
+  buildProviderModelRef,
   buildCustomLlmProfilePreset,
   getCustomLlmProfileIds,
   getLlmPresetById,
+  isKnownProviderModelRef,
   isCustomProviderConfigId,
 } from "./llm-preset-utils"
 import { resolveConfig } from "./preset-resolver"
@@ -78,5 +80,53 @@ describe("custom LLM profiles", () => {
     expect(isCustomProviderConfigId("custom:old-profile")).toBe(true)
     expect(isCustomProviderConfigId("custom-1760000000000")).toBe(true)
     expect(isCustomProviderConfigId("openai")).toBe(false)
+  })
+
+  it("resolves custom provider cards as selectable LLM presets", () => {
+    const configs: ProviderConfigs = {
+      "custom-1": {
+        label: "MiMo gateway",
+        apiKey: "sk-test",
+        baseUrl: "https://token-plan-cn.xiaomimimo.com/v1",
+        apiMode: "chat_completions",
+        model: "",
+        enabled: true,
+        savedModels: [
+          {
+            id: "mimo",
+            name: "mimo-v2.5-pro",
+            model: "mimo-v2.5-pro",
+            createdAt: 1,
+          },
+        ],
+      },
+    }
+
+    const preset = getLlmPresetById("custom-1", configs)
+    expect(preset?.provider).toBe("custom")
+    expect(preset?.label).toBe("MiMo gateway")
+    expect(buildProviderModelRef("custom-1", configs["custom-1"], "fallback")).toBe(
+      "custom-1/mimo-v2.5-pro",
+    )
+    expect(isKnownProviderModelRef("custom-1/mimo-v2.5-pro", configs)).toBe(true)
+  })
+
+  it("treats disabled or missing provider model refs as stale", () => {
+    const configs: ProviderConfigs = {
+      "codex-cli": {
+        enabled: false,
+        savedModels: [
+          {
+            id: "gpt",
+            name: "gpt-5.5",
+            model: "gpt-5.5",
+            createdAt: 1,
+          },
+        ],
+      },
+    }
+
+    expect(isKnownProviderModelRef("codex-cli/gpt-5.5", configs)).toBe(false)
+    expect(isKnownProviderModelRef("missing/gpt-5.5", configs)).toBe(false)
   })
 })
