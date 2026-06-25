@@ -5,6 +5,8 @@ use std::path::PathBuf;
 pub struct ServerConfig {
     pub server: ServerSection,
     pub app: AppSection,
+    #[serde(default = "default_allowed_origins")]
+    pub allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,6 +28,16 @@ pub struct AppSection {
 fn default_host() -> String { "127.0.0.1".to_string() }
 fn default_port() -> u16 { 5800 }
 fn default_true() -> bool { true }
+fn default_allowed_origins() -> Vec<String> {
+    vec![
+        "http://localhost:5800".to_string(),
+        "http://127.0.0.1:5800".to_string(),
+        "http://localhost:1420".to_string(),
+        "http://127.0.0.1:1420".to_string(),
+        "tauri://localhost".to_string(),
+        "https://tauri.localhost".to_string(),
+    ]
+}
 
 impl Default for ServerConfig {
     fn default() -> Self {
@@ -38,6 +50,7 @@ impl Default for ServerConfig {
                 project_path: String::new(),
                 open_browser: true,
             },
+            allowed_origins: default_allowed_origins(),
         }
     }
 }

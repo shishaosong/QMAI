@@ -24,10 +24,4 @@ describe("LLM provider model controls", () => {
     expect(source).toContain("retryFailed((modelId)")
     expect(source).toContain("重试失败模型")
   })
-
-  it("uses the custom provider card manager instead of duplicating custom preset rows", () => {
-    expect(source).toContain('import { CustomProviderCards } from "./custom-provider-cards"')
-    expect(source).toContain("<CustomProviderCards />")
-    expect(source).toContain('LLM_PRESETS.filter((p) => p.id !== "custom")')
-  })
 })

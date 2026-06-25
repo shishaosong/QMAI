@@ -172,7 +172,7 @@ export function DataManagementSection() {
         </div>
         <p className="text-sm text-muted-foreground">
           {t("settings.sections.dataManagement.importDescription", {
-            defaultValue: "从 zip 备份文件恢复数据。导入后需要重启软件以使配置生效。",
+            defaultValue: "从 zip 备份文件恢复数据。项目数据会立即刷新，全局配置更改可能需要重启软件生效。",
           })}
         </p>
 
@@ -221,7 +221,7 @@ export function DataManagementSection() {
               <div className="flex items-start gap-2 text-green-600">
                 <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <div>
-                  <p>{t("settings.sections.dataManagement.importSuccess", { defaultValue: "导入成功，请重启软件以使配置生效" })}</p>
+                  <p>{t("settings.sections.dataManagement.importSuccess", { defaultValue: "导入成功，项目数据已自动刷新，部分全局配置可能需要重启生效" })}</p>
                   {importResult.projects.length > 0 && (
                     <p className="text-muted-foreground">
                       {t("settings.sections.dataManagement.restoredProjects", {

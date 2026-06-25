@@ -4,6 +4,9 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/platform"
 import { serverEvents } from "@/lib/server-events"
 import { loadRegistry, upsertProjectInfo } from "@/lib/project-identity"
+import { refreshProjectState } from "@/lib/project-refresh"
+import { useWikiStore } from "@/stores/wiki-store"
+import { normalizePath } from "@/lib/path-utils"
 import type {
   ImportParams,
   ImportResult,
@@ -11,6 +14,24 @@ import type {
   ProjectRestoreInfo,
   BackupProgressCallback,
 } from "./types"
+
+/**
+ * 如果导入的项目包含当前打开的项目，则刷新当前项目的文件树和数据版本，
+ * 让知识树等组件自动重新加载，无需用户手动重启或重新打开项目。
+ */
+async function refreshCurrentProjectIfNeeded(restoredProjects: Array<{ path: string; success: boolean }>): Promise<void> {
+  const currentProject = useWikiStore.getState().project
+  if (!currentProject) return
+
+  const currentPath = normalizePath(currentProject.path)
+  const needsRefresh = restoredProjects.some(
+    (p) => p.success && normalizePath(p.path) === currentPath,
+  )
+
+  if (needsRefresh) {
+    await refreshProjectState(currentPath)
+  }
+}
 
 function pickFileBrowser(): Promise<File | null> {
   return new Promise((resolve) => {
@@ -105,9 +126,11 @@ export async function importBackup(
           if (project.success) {
             const registry = await loadRegistry()
             const existing = registry[project.id]
-            await upsertProjectInfo(project.id, project.path, existing?.name ?? "已恢复项目")
+            await upsertProjectInfo(project.id, project.path, existing?.name ?? project.name)
           }
         }
+        // 如果导入的是当前打开的项目，自动刷新
+        await refreshCurrentProjectIfNeeded(result.projects)
       }
 
       return result
@@ -175,9 +198,11 @@ export async function importBackup(
         if (project.success) {
           const registry = await loadRegistry()
           const existing = registry[project.id]
-          await upsertProjectInfo(project.id, project.path, existing?.name ?? "已恢复项目")
+          await upsertProjectInfo(project.id, project.path, existing?.name ?? project.name)
         }
       }
+      // 如果导入的是当前打开的项目，自动刷新
+      await refreshCurrentProjectIfNeeded(result.projects)
     }
 
     return result

@@ -337,23 +337,6 @@ function reasoningEffort(reasoning: ReasoningConfig): "low" | "medium" | "high" 
   return null
 }
 
-function isClaudeModelId(model: string): boolean {
-  return /(?:^|[/:\s])claude[-_]/i.test(model.trim())
-}
-
-function shouldSendOpenAiCompatibleReasoningEffort(config: LlmConfig, effort: string | null): boolean {
-  if (!effort) return false
-  if (config.provider === "openai" || config.provider === "azure") return true
-  if (config.provider !== "custom") return false
-  // Many API relays expose Claude models through an OpenAI-compatible
-  // /chat/completions route, but they reject OpenAI-specific
-  // `reasoning_effort`. Anthropic thinking is only safe on the
-  // Anthropic Messages wire, where buildAnthropicBodyWithReasoning
-  // translates it to `{ thinking: ... }`.
-  if (isClaudeModelId(config.model)) return false
-  return true
-}
-
 function isDeepSeekEndpoint(config: LlmConfig): boolean {
   return /deepseek/i.test(config.model) || /deepseek/i.test(config.customEndpoint)
 }
@@ -444,7 +427,7 @@ function buildOpenAiCompatibleBody(
   }
 
   const effort = reasoningEffort(reasoning)
-  if (shouldSendOpenAiCompatibleReasoningEffort(config, effort)) {
+  if ((config.provider === "openai" || config.provider === "azure" || config.provider === "custom") && effort) {
     body.reasoning_effort = effort
   }
 

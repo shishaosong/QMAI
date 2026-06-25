@@ -17,9 +17,9 @@ function customAutoConfig(): LlmConfig {
 }
 
 describe("user visible reasoning", () => {
-  it("defaults auto reasoning to high for visible AI chat generation", () => {
-    expect(resolveUserVisibleReasoning({ mode: "auto" })).toEqual({ mode: "high" })
-    expect(resolveUserVisibleReasoning(undefined)).toEqual({ mode: "high" })
+  it("keeps auto reasoning as auto for visible AI chat generation", () => {
+    expect(resolveUserVisibleReasoning({ mode: "auto" })).toEqual({ mode: "auto" })
+    expect(resolveUserVisibleReasoning(undefined)).toEqual({ mode: "auto" })
   })
 
   it("keeps explicit reasoning settings unchanged", () => {
@@ -31,14 +31,14 @@ describe("user visible reasoning", () => {
     })
   })
 
-  it("turns auto into an explicit thinking request on the OpenAI-compatible wire", () => {
+  it("leaves auto as auto on the OpenAI-compatible wire (no explicit thinking request)", () => {
     const config = customAutoConfig()
     const body = getProviderConfig(config).buildBody(
       [{ role: "user", content: "继续写下一章" }],
       { reasoning: resolveUserVisibleReasoning(config.reasoning) },
     ) as Record<string, unknown>
 
-    expect(body.reasoning_effort).toBe("high")
-    expect(body.chat_template_kwargs).toEqual({ enable_thinking: true })
+    expect(body.reasoning_effort).toBeUndefined()
+    expect(body.chat_template_kwargs).toBeUndefined()
   })
 })

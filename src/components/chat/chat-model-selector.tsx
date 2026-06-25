@@ -5,11 +5,11 @@ import { createPortal } from "react-dom"
 import { Button } from "@/components/ui/button"
 import { useWikiStore, type SavedModel } from "@/stores/wiki-store"
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
-import { isCustomProviderConfigId } from "@/components/settings/llm-preset-utils"
 
 interface ChatModelSelectorProps {
   value: string
   onChange: (model: string) => void
+  disabled?: boolean
 }
 
 interface ModelGroup {
@@ -21,7 +21,7 @@ interface ModelGroup {
 const DROPDOWN_MAX_HEIGHT = 400
 const DROPDOWN_GAP = 6
 
-export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
+export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelectorProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
@@ -32,8 +32,8 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
   const modelGroups = useMemo<ModelGroup[]>(() => {
     const groups: ModelGroup[] = []
 
-    // 遍历所有内置预设，过滤已停用的
-    const builtinKeys = Object.keys(providerConfigs).filter((k) => !isCustomProviderConfigId(k))
+    // 遍历所有内置预设（非 custom- 开头），过滤已停用的
+    const builtinKeys = Object.keys(providerConfigs).filter((k) => !k.startsWith("custom-"))
     for (const key of builtinKeys) {
       const config = providerConfigs[key]
       // 过滤掉未启用（enabled !== true）的预设
@@ -49,7 +49,7 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
     }
 
     // 自定义卡片
-    const customKeys = Object.keys(providerConfigs).filter(isCustomProviderConfigId)
+    const customKeys = Object.keys(providerConfigs).filter((k) => k.startsWith("custom-"))
     for (const key of customKeys) {
       const config = providerConfigs[key]
       // 过滤掉已停用（enabled === false）的卡片
@@ -57,7 +57,7 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
       if (config.savedModels && config.savedModels.length > 0) {
         groups.push({
           id: key,
-          label: config.label || config.name || "自定义模型",
+          label: config.label || "自定义模型",
           models: config.savedModels,
         })
       }
@@ -125,7 +125,8 @@ export function ChatModelSelector({ value, onChange }: ChatModelSelectorProps) {
         ref={triggerRef}
         type="button"
         variant="outline"
-        onClick={() => setOpen(!open)}
+        onClick={() => !disabled && setOpen(!open)}
+        disabled={disabled}
         className="h-8 min-w-[160px] justify-between gap-2 px-3 text-xs"
       >
         <span className="max-w-[200px] truncate">

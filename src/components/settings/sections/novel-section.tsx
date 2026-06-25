@@ -24,6 +24,7 @@ export function NovelSection({ draft, setDraft }: Props) {
   const setNovelMode = useWikiStore((s) => s.setNovelMode)
   const setNovelConfigStore = useWikiStore((s) => s.setNovelConfig)
   const llmConfig = useWikiStore((s) => s.llmConfig)
+  const aiChatModel = useWikiStore((s) => s.aiChatModel)
   const project = useWikiStore((s) => s.project)
   const [testStates, setTestStates] = useState<Record<TestableNovelModelTask, {
     loading: boolean
@@ -414,24 +415,37 @@ export function NovelSection({ draft, setDraft }: Props) {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => updateNovelConfig({
-                        [item.field]: "",
-                      } as Partial<NovelConfig>)}
-                      className={`rounded-md border px-3 py-1.5 text-xs transition-colors ${
-                        isFollowingChat
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border hover:bg-accent"
-                      }`}
-                    >
-                      {t("novel.settings.followChatModel")}
-                    </button>
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={isFollowingChat}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            // 勾选：清空模型值，跟随 AI 会话模型
+                            updateNovelConfig({
+                              [item.field]: "",
+                            } as Partial<NovelConfig>)
+                          } else {
+                            // 取消勾选：如果当前模型值为空，使用 AI 会话当前模型作为默认值
+                            if (!modelValue && aiChatModel) {
+                              updateNovelConfig({
+                                [item.field]: aiChatModel,
+                              } as Partial<NovelConfig>)
+                            }
+                          }
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <span className="text-sm">
+                        {t("novel.settings.followChatModel")}
+                      </span>
+                    </label>
                     <ChatModelSelector
                       value={displayValue}
                       onChange={(model) => updateNovelConfig({
                         [item.field]: model,
                       } as Partial<NovelConfig>)}
+                      disabled={isFollowingChat}
                     />
                   </div>
                   <Button

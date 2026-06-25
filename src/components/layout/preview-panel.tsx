@@ -5,7 +5,7 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { resolveDefaultModel } from "@/lib/novel/model-resolver"
 import type { FinalChapterSavePhase } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
-import { deleteFile, fileExists, readFile, writeFile, listDirectory } from "@/commands/fs"
+import { deleteFile, fileExists, readFile, writeFile, writeFileAtomic, listDirectory } from "@/commands/fs"
 import { normalizePath } from "@/lib/path-utils"
 import { getFileCategory, isBinary } from "@/lib/file-types"
 import { WikiEditor } from "@/components/editor/wiki-editor"
@@ -93,12 +93,30 @@ function extractChapterNumberFromMarkdown(markdown: string): number | null {
   return parseChapterMeta(frontmatter as Record<string, unknown>)?.chapterNumber ?? null
 }
 
-function formatWritingBody(markdown: string): string {
+function formatWritingBodyWithIndent(markdown: string): string {
   return formatChapterWriting(markdown)
+  /*
+  const lines = body.split("\n")
+  let inFence = false
+  const formatted = lines.map((line) => {
+    const trimmed = line.trim()
+    if (trimmed.startsWith("```")) {
+      inFence = !inFence
+      return line
+    }
+    if (inFence) return line
+    if (!trimmed) return line
+    if (/^(#{1,6}\s|>\s|[-*+]\s|\d+\.\s|\|)/.test(trimmed)) return line
+    if (/^\s*[-]{3,}\s*$/.test(trimmed)) return line
+    if (/^\s*[　 ]{2}/.test(line)) return line
+    return `　　${line}`
+  })
+  return rawBlock + formatted.join("\n")
+  */
 }
 
 function normalizeChapterWriting(markdown: string): string {
-  return formatWritingBody(syncChapterFrontmatterTitle(markdown))
+  return formatWritingBodyWithIndent(syncChapterFrontmatterTitle(markdown))
 }
 
 function updateChapterHeading(markdown: string, nextTitle: string): string {
@@ -196,7 +214,7 @@ export function PreviewPanel() {
     const chapterNumber = extractChapterNumberFromMarkdown(normalized)
     const targetPath = await getCanonicalChapterPath(path, normalized, chapterNumber)
 
-    await writeFile(targetPath, normalized)
+    await writeFileAtomic(targetPath, normalized)
     if (targetPath !== path) {
       await deleteFile(path)
       if (project) {
@@ -321,7 +339,7 @@ export function PreviewPanel() {
       if (persistedMarkdown === lastLoadedRef.current) return
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
       saveTimerRef.current = setTimeout(() => {
-        writeFile(selectedFile, persistedMarkdown)
+        writeFileAtomic(selectedFile, persistedMarkdown)
           .then(() => {
             // Our own write becomes the new "last loaded" — subsequent
             // re-emits from Milkdown that match this content must not
@@ -612,7 +630,7 @@ export function PreviewPanel() {
           const verifyParsed = parseFrontmatter(verifyContent)
           const verifyFm = verifyParsed.frontmatter as Record<string, unknown> | null
           if (!verifyFm || !isFinalChapter(verifyFm)) {
-            await writeFile(targetPath, syncResult.markdown)
+            await writeFileAtomic(targetPath, syncResult.markdown)
             await new Promise((resolve) => setTimeout(resolve, 100))
           }
           const chapterTitle = chapterFrontmatter?.title || `第${chapterFrontmatter?.chapterNumber || '?'}章`
@@ -718,7 +736,7 @@ export function PreviewPanel() {
     setFileContent(formatted)
     lastLoadedRef.current = formatted
     try {
-      await writeFile(selectedFile, formatted)
+      await writeFileAtomic(selectedFile, formatted)
       bumpDataVersion()
     } catch (err) {
       console.error("格式化写作内容失败:", err)
@@ -1219,7 +1237,7 @@ export function PreviewPanel() {
               type="button"
               onClick={() => void handleFormatWriting()}
               className="shrink-0 rounded border border-border px-2 py-1 text-xs text-foreground hover:bg-accent"
-              title={t("preview.formatWritingTitle", { defaultValue: "自动整理正文段落格式，并去除首行缩进" })}
+              title={t("preview.formatWritingTitle", { defaultValue: "自动整理正文段落格式，并为段落添加首行缩进" })}
             >
               {t("preview.formatWriting", { defaultValue: "一键排版" })}
             </button>

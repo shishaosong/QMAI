@@ -17,25 +17,20 @@
 //! capabilities JSON.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
-use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use super::cli_resolver::find_cli_command;
 use super::local_cli_config::{
-    apply_local_cli_environment, read_claude_local_config, resolve_cli_project_dir,
-    resolve_home_dir, LocalCliConfigInfo,
+    apply_local_cli_environment, read_claude_local_config, resolve_home_dir, LocalCliConfigInfo,
 };
-
-const CLAUDE_MCP_CONFIG_DIR: &str = ".qmai/claude-mcp-configs";
 
 // ── Event emitter abstraction ─────────────────────────────────────
 // Allows both Tauri (app.emit) and the standalone server (broadcast
@@ -163,53 +158,8 @@ fn claude_content_blocks(content: &ClaudeContent) -> Vec<serde_json::Value> {
     }
 }
 
-async fn find_claude_command() -> Result<PathBuf, String> {
+async fn find_claude_command() -> Result<std::path::PathBuf, String> {
     find_cli_command("claude", &["claude.cmd", "claude.exe"]).await
-}
-
-fn safe_mcp_config_file_stem(stream_id: &str) -> String {
-    let stem: String = stream_id
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if stem.is_empty() {
-        "mcp-config".to_string()
-    } else {
-        stem
-    }
-}
-
-async fn write_empty_mcp_config_file(
-    project_dir: Option<&Path>,
-    stream_id: &str,
-) -> Result<PathBuf, String> {
-    let base_dir = match project_dir {
-        Some(dir) => dir.to_path_buf(),
-        None => std::env::current_dir()
-            .map_err(|error| format!("Failed to resolve current directory: {error}"))?,
-    };
-    let config_dir = base_dir.join(CLAUDE_MCP_CONFIG_DIR);
-    fs::create_dir_all(&config_dir).await.map_err(|error| {
-        format!(
-            "Failed to create Claude MCP config directory '{}': {error}",
-            config_dir.display()
-        )
-    })?;
-
-    let path = config_dir.join(format!("{}.json", safe_mcp_config_file_stem(stream_id)));
-    fs::write(&path, r#"{"mcpServers":{}}"#).await.map_err(|error| {
-        format!(
-            "Failed to write Claude MCP config file '{}': {error}",
-            path.display()
-        )
-    })?;
-    Ok(path)
 }
 
 fn suppress_windows_console(_cmd: &mut Command) {
@@ -318,7 +268,6 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
     model: String,
     messages: Vec<ClaudeMessage>,
     isolate_local_config: bool,
-    project_path: Option<String>,
 ) -> Result<(), String> {
     // Build the turn list: fold any system messages into a preamble on
     // the first user turn rather than using a CLI flag, because
@@ -359,39 +308,19 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
         .collect();
 
     let claude = find_claude_command().await?;
-    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
-    let mcp_config_file = if isolate_local_config {
-        Some(write_empty_mcp_config_file(project_dir.as_deref(), &stream_id).await?)
-    } else {
-        None
-    };
     let mut cmd = Command::new(&claude);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
-    if let Some(dir) = &project_dir {
-        cmd.current_dir(dir);
-    }
-    cmd.args(build_claude_cli_args(
-        &model,
-        isolate_local_config,
-        project_dir.as_deref(),
-        mcp_config_file.as_deref(),
-    ));
+    cmd.args(build_claude_cli_args(&model, isolate_local_config));
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            if let Some(path) = &mcp_config_file {
-                let _ = fs::remove_file(path).await;
-            }
-            return Err(format!("Failed to spawn claude: {error}"));
-        }
-    };
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn claude: {e}"))?;
 
     let mut stdin = child
         .stdin
@@ -441,7 +370,6 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
 
     let children = Arc::clone(&state.children);
     let stream_id_task = stream_id.clone();
-    let mcp_config_file_task = mcp_config_file.clone();
     let emitter_task = emitter.clone();
 
     // Drain stdout line-by-line in a background task, emitting each
@@ -492,9 +420,6 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
         };
 
         let stderr_text = stderr_task.await.unwrap_or_default();
-        if let Some(path) = &mcp_config_file_task {
-            let _ = fs::remove_file(path).await;
-        }
 
         emitter_task.emit_done(&stream_id_task, exit_code, stderr_text);
     });
@@ -510,27 +435,12 @@ pub async fn claude_cli_spawn(
     model: String,
     messages: Vec<ClaudeMessage>,
     isolate_local_config: bool,
-    project_path: Option<String>,
 ) -> Result<(), String> {
     let emitter = TauriCliEmitter::new(app);
-    do_claude_cli_spawn(
-        &state,
-        emitter,
-        stream_id,
-        model,
-        messages,
-        isolate_local_config,
-        project_path,
-    )
-    .await
+    do_claude_cli_spawn(&state, emitter, stream_id, model, messages, isolate_local_config).await
 }
 
-fn build_claude_cli_args(
-    model: &str,
-    isolate_local_config: bool,
-    project_dir: Option<&Path>,
-    mcp_config_file: Option<&Path>,
-) -> Vec<String> {
+fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         "--output-format".to_string(),
@@ -544,6 +454,9 @@ fn build_claude_cli_args(
         args.extend([
             "--setting-sources".to_string(),
             "project".to_string(),
+            "--strict-mcp-config".to_string(),
+            "--mcp-config".to_string(),
+            "{\"mcpServers\":{}}".to_string(),
             "--disable-slash-commands".to_string(),
             "--tools".to_string(),
             "".to_string(),
@@ -553,22 +466,8 @@ fn build_claude_cli_args(
         ]);
     }
 
-    if let Some(dir) = project_dir {
-        args.extend(["--add-dir".to_string(), dir.to_string_lossy().to_string()]);
-    }
-
     if !model.trim().is_empty() {
         args.extend(["--model".to_string(), model.to_string()]);
-    }
-
-    if isolate_local_config {
-        if let Some(path) = mcp_config_file {
-            args.extend([
-                "--strict-mcp-config".to_string(),
-                "--mcp-config".to_string(),
-                path.to_string_lossy().to_string(),
-            ]);
-        }
     }
     args
 }
@@ -644,7 +543,7 @@ mod tests {
 
     #[test]
     fn claude_args_do_not_isolate_local_config_by_default() {
-        let args = build_claude_cli_args("sonnet", false, None, None);
+        let args = build_claude_cli_args("sonnet", false);
 
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -655,12 +554,7 @@ mod tests {
 
     #[test]
     fn claude_args_can_isolate_user_config_tools_and_mcp() {
-        let args = build_claude_cli_args(
-            "sonnet",
-            true,
-            None,
-            Some(Path::new(".qmai/claude-mcp-configs/test.json")),
-        );
+        let args = build_claude_cli_args("sonnet", true);
 
         assert!(args
             .windows(2)
@@ -668,7 +562,7 @@ mod tests {
         assert!(args.contains(&"--strict-mcp-config".to_string()));
         assert!(args
             .windows(2)
-            .any(|pair| pair[0] == "--mcp-config" && pair[1].ends_with("test.json")));
+            .any(|pair| pair[0] == "--mcp-config" && pair[1] == "{\"mcpServers\":{}}"));
         assert!(args.contains(&"--disable-slash-commands".to_string()));
         assert!(args
             .windows(2)
@@ -681,7 +575,7 @@ mod tests {
 
     #[test]
     fn claude_args_skip_model_flag_when_model_is_empty() {
-        let args = build_claude_cli_args("", false, None, None);
+        let args = build_claude_cli_args("", false);
         assert!(!args.contains(&"--model".to_string()));
     }
 }

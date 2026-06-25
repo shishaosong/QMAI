@@ -5,7 +5,6 @@
 //! spawn this fixed command; it cannot execute arbitrary shell commands.
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -15,15 +14,13 @@ use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter, State};
-use tokio::fs;
-use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
 use super::cli_resolver::{child_path_env, find_cli_command};
 use super::local_cli_config::{
-    apply_local_cli_environment, read_codex_local_config, resolve_cli_project_dir,
-    resolve_home_dir, LocalCliConfigInfo,
+    apply_local_cli_environment, read_codex_local_config, resolve_home_dir, LocalCliConfigInfo,
 };
 
 // ── Event emitter abstraction ─────────────────────────────────────
@@ -81,17 +78,11 @@ pub struct DetectResult {
     error: Option<String>,
 }
 
-#[derive(Serialize)]
-pub struct ModelListResult {
-    models: Vec<String>,
-}
-
 const DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 10;
 const MIN_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 1;
 const MAX_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 240;
 const STDERR_LIMIT_BYTES: usize = 1024 * 1024;
 const STDOUT_LIMIT_BYTES: usize = 1024 * 1024;
-const CODEX_PROMPT_DIR: &str = ".qmai/codex-prompts";
 
 fn append_capped_line(collected: &mut String, line: &str, limit_bytes: usize) {
     if collected.len() >= limit_bytes {
@@ -108,54 +99,8 @@ fn append_capped_line(collected: &mut String, line: &str, limit_bytes: usize) {
     }
 }
 
-async fn find_codex_command() -> Result<PathBuf, String> {
+async fn find_codex_command() -> Result<std::path::PathBuf, String> {
     find_cli_command("codex", &["codex.cmd", "codex.exe"]).await
-}
-
-fn safe_prompt_file_stem(stream_id: &str) -> String {
-    let stem: String = stream_id
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect();
-    if stem.is_empty() {
-        "prompt".to_string()
-    } else {
-        stem
-    }
-}
-
-async fn write_codex_prompt_file(
-    project_dir: Option<&Path>,
-    stream_id: &str,
-    prompt: &str,
-) -> Result<PathBuf, String> {
-    let base_dir = match project_dir {
-        Some(dir) => dir.to_path_buf(),
-        None => std::env::current_dir()
-            .map_err(|error| format!("Failed to resolve current directory: {error}"))?,
-    };
-    let prompt_dir = base_dir.join(CODEX_PROMPT_DIR);
-    fs::create_dir_all(&prompt_dir).await.map_err(|error| {
-        format!(
-            "Failed to create Codex prompt directory '{}': {error}",
-            prompt_dir.display()
-        )
-    })?;
-
-    let path = prompt_dir.join(format!("{}.txt", safe_prompt_file_stem(stream_id)));
-    fs::write(&path, prompt).await.map_err(|error| {
-        format!(
-            "Failed to write Codex prompt file '{}': {error}",
-            path.display()
-        )
-    })?;
-    Ok(path)
 }
 
 fn suppress_windows_console(_cmd: &mut Command) {
@@ -255,39 +200,6 @@ pub async fn codex_cli_detect() -> Result<DetectResult, String> {
     do_codex_cli_detect().await
 }
 
-#[tauri::command]
-pub async fn codex_cli_list_models() -> Result<ModelListResult, String> {
-    let codex = find_codex_command().await?;
-    let mut cmd = Command::new(&codex);
-    suppress_windows_console(&mut cmd);
-    apply_local_cli_environment(&mut cmd);
-    if let Some(path_env) = child_path_env().await {
-        cmd.env("PATH", path_env);
-    }
-
-    let output = tokio::time::timeout(
-        Duration::from_secs(20),
-        cmd.args(["debug", "models"]).output(),
-    )
-    .await
-    .map_err(|_| "`codex debug models` timed out after 20 seconds".to_string())?
-    .map_err(|error| format!("Failed to run `codex debug models`: {error}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
-        return Err(if stderr.is_empty() {
-            format!("`codex debug models` exited with {}", output.status)
-        } else {
-            stderr
-        });
-    }
-
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    Ok(ModelListResult {
-        models: parse_codex_debug_models(&stdout)?,
-    })
-}
-
 /// Spawn `codex exec --json` and pipe stdout back via the given emitter.
 /// Closes stdin after writing the prompt so codex starts processing.
 /// Emits a final done event with `{ code, stderr, stdout }` when the
@@ -301,7 +213,6 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     model: String,
     prompt: String,
     isolate_local_config: bool,
-    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 ) -> Result<(), String> {
     if prompt.trim().is_empty() {
@@ -309,8 +220,6 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     }
 
     let codex = find_codex_command().await?;
-    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
-    let prompt_file = write_codex_prompt_file(project_dir.as_deref(), &stream_id, &prompt).await?;
     let mut cmd = Command::new(&codex);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
@@ -320,29 +229,21 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     if isolate_local_config {
         isolate_llm_api_key_env(&mut cmd);
     }
-    if let Some(dir) = &project_dir {
-        cmd.current_dir(dir);
-    }
-    cmd.args(build_codex_cli_args(
-        &model,
-        isolate_local_config,
-        project_dir.as_deref(),
-        &prompt_file,
-    ));
+    cmd.args(build_codex_cli_args(&model, isolate_local_config));
 
-    cmd.stdin(Stdio::null())
+    cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let mut child = match cmd.spawn() {
-        Ok(child) => child,
-        Err(error) => {
-            let _ = fs::remove_file(&prompt_file).await;
-            return Err(format!("Failed to spawn codex: {error}"));
-        }
-    };
+    let mut child = cmd
+        .spawn()
+        .map_err(|e| format!("Failed to spawn codex: {e}"))?;
 
+    let mut stdin = child
+        .stdin
+        .take()
+        .ok_or_else(|| "Missing stdin handle".to_string())?;
     let stdout = child
         .stdout
         .take()
@@ -351,6 +252,16 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
         .stderr
         .take()
         .ok_or_else(|| "Missing stderr handle".to_string())?;
+
+    stdin
+        .write_all(prompt.as_bytes())
+        .await
+        .map_err(|e| format!("Failed to write to codex stdin: {e}"))?;
+    stdin
+        .flush()
+        .await
+        .map_err(|e| format!("Failed to flush codex stdin: {e}"))?;
+    drop(stdin);
 
     state.children.lock().await.insert(stream_id.clone(), child);
 
@@ -362,7 +273,6 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     let timeout_minutes = codex_spawn_timeout_minutes(timeout_minutes);
     let timeout_duration = Duration::from_secs(timeout_minutes * 60);
     let stream_id_task = stream_id.clone();
-    let prompt_file_task = prompt_file.clone();
     let emitter_task = emitter.clone();
 
     tokio::spawn(async move {
@@ -410,7 +320,6 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
         } else {
             None
         };
-        let _ = fs::remove_file(&prompt_file_task).await;
 
         let mut stderr_text = stderr_task.await.unwrap_or_default();
         if timed_out.load(Ordering::SeqCst) {
@@ -445,21 +354,10 @@ pub async fn codex_cli_spawn(
     model: String,
     prompt: String,
     isolate_local_config: bool,
-    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 ) -> Result<(), String> {
     let emitter = TauriCodexEmitter::new(app);
-    do_codex_cli_spawn(
-        &state,
-        emitter,
-        stream_id,
-        model,
-        prompt,
-        isolate_local_config,
-        project_path,
-        timeout_minutes,
-    )
-    .await
+    do_codex_cli_spawn(&state, emitter, stream_id, model, prompt, isolate_local_config, timeout_minutes).await
 }
 
 fn codex_spawn_timeout_minutes(value: Option<u64>) -> u64 {
@@ -468,37 +366,7 @@ fn codex_spawn_timeout_minutes(value: Option<u64>) -> u64 {
         .clamp(MIN_CODEX_SPAWN_TIMEOUT_MINUTES, MAX_CODEX_SPAWN_TIMEOUT_MINUTES)
 }
 
-fn parse_codex_debug_models(stdout: &str) -> Result<Vec<String>, String> {
-    let value: serde_json::Value = serde_json::from_str(stdout)
-        .map_err(|error| format!("Failed to parse `codex debug models` JSON: {error}"))?;
-    let Some(models) = value.get("models").and_then(serde_json::Value::as_array) else {
-        return Ok(Vec::new());
-    };
-
-    let mut parsed = Vec::new();
-    for model in models {
-        let slug = model
-            .get("slug")
-            .or_else(|| model.get("id"))
-            .or_else(|| model.get("name"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty());
-        if let Some(slug) = slug {
-            parsed.push(slug.to_string());
-        }
-    }
-    parsed.sort();
-    parsed.dedup();
-    Ok(parsed)
-}
-
-fn build_codex_cli_args(
-    model: &str,
-    isolate_local_config: bool,
-    project_dir: Option<&Path>,
-    prompt_file: &Path,
-) -> Vec<String> {
+fn build_codex_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
     let mut args = vec!["-a".to_string(), "never".to_string(), "exec".to_string()];
 
     if isolate_local_config {
@@ -506,10 +374,6 @@ fn build_codex_cli_args(
             "--ignore-user-config".to_string(),
             "--ignore-rules".to_string(),
         ]);
-    }
-
-    if let Some(dir) = project_dir {
-        args.extend(["--cd".to_string(), dir.to_string_lossy().to_string()]);
     }
 
     args.extend([
@@ -522,10 +386,7 @@ fn build_codex_cli_args(
     if !model.trim().is_empty() {
         args.extend(["--model".to_string(), model.to_string()]);
     }
-    args.push(format!(
-        "Read the complete user request from this UTF-8 text file and follow it exactly. Return only the final answer unless the file asks otherwise: {}",
-        prompt_file.display()
-    ));
+    args.push("-".to_string());
     args
 }
 
@@ -599,8 +460,7 @@ mod tests {
 
     #[test]
     fn codex_args_do_not_isolate_local_config_by_default() {
-        let prompt_file = Path::new(".qmai/codex-prompts/test.txt");
-        let args = build_codex_cli_args("gpt-5", false, None, prompt_file);
+        let args = build_codex_cli_args("gpt-5", false);
 
         assert!(args
             .windows(3)
@@ -613,8 +473,7 @@ mod tests {
 
     #[test]
     fn codex_args_can_isolate_user_config_and_rules() {
-        let prompt_file = Path::new(".qmai/codex-prompts/test.txt");
-        let args = build_codex_cli_args("gpt-5", true, None, prompt_file);
+        let args = build_codex_cli_args("gpt-5", true);
         let exec_pos = args.iter().position(|arg| arg == "exec").expect("exec arg");
         let ignore_config_pos = args
             .iter()
@@ -631,8 +490,7 @@ mod tests {
 
     #[test]
     fn codex_args_do_not_isolate_user_api_key_by_default() {
-        let prompt_file = Path::new(".qmai/codex-prompts/test.txt");
-        let args = build_codex_cli_args("gpt-5", false, None, prompt_file);
+        let args = build_codex_cli_args("gpt-5", false);
 
         assert!(!args.contains(&"--ignore-user-config".to_string()));
         assert!(!args.contains(&"--ignore-rules".to_string()));
@@ -640,12 +498,8 @@ mod tests {
 
     #[test]
     fn codex_args_skip_model_flag_when_model_is_empty() {
-        let prompt_file = Path::new(".qmai/codex-prompts/test.txt");
-        let args = build_codex_cli_args("", false, None, prompt_file);
+        let args = build_codex_cli_args("", false);
         assert!(!args.contains(&"--model".to_string()));
-        assert!(args
-            .last()
-            .map(|arg| arg.contains(".qmai/codex-prompts/test.txt"))
-            .unwrap_or(false));
+        assert_eq!(args.last().map(String::as_str), Some("-"));
     }
 }

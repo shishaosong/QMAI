@@ -316,6 +316,9 @@ export function SettingsView() {
       saveSourceWatchConfig,
       saveRevisionFeedbackWindowConfig,
       saveNovelConfig,
+      saveOutputLanguage,
+      saveMaxHistoryMessages,
+      saveUiFontSizeScale,
     } = await import("@/lib/project-store")
 
     const newLlm = {
@@ -441,7 +444,12 @@ export function SettingsView() {
     setNovelConfig(draft.novelConfig)
     await saveNovelConfig(draft.novelConfig, project?.id, project?.path)
 
+    setOutputLanguage(draft.outputLanguage)
+    await saveOutputLanguage(draft.outputLanguage, project?.id)
+    setMaxHistoryMessages(draft.maxHistoryMessages)
+    await saveMaxHistoryMessages(draft.maxHistoryMessages, project?.id, project?.path)
     setUiFontSizeScale(draft.uiFontSizeScale)
+    await saveUiFontSizeScale(draft.uiFontSizeScale, project?.id, project?.path)
 
     if (draft.uiLanguage !== i18n.language) {
       await i18n.changeLanguage(draft.uiLanguage)

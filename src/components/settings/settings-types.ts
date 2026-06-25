@@ -1,5 +1,5 @@
 import type { CustomApiMode } from "./llm-presets"
-import type { AzureModelFamily, ReasoningConfig, SourceWatchConfig, RevisionFeedbackWindowConfig, NovelConfig, RerankConfig } from "@/stores/wiki-store"
+import type { AzureModelFamily, ReasoningConfig, SourceWatchConfig, RevisionFeedbackWindowConfig, NovelConfig, RerankConfig, OutputLanguage } from "@/stores/wiki-store"
 
 /**
  * Shape of the draft state each section reads from and writes into.
@@ -47,7 +47,7 @@ export interface SettingsDraft {
   multimodalConcurrency: number
 
   // Output preferences
-  outputLanguage: string
+  outputLanguage: OutputLanguage
   maxHistoryMessages: number
 
   // Network — global outbound HTTP proxy. Persisted to app-state.json

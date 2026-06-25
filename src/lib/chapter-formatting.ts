@@ -56,7 +56,7 @@ export function formatChapterWriting(markdown: string): string {
     ) {
       formatted.push("")
     }
-    formatted.push(trimmed.replace(/^[　 ]+/, ""))
+    formatted.push(`　　${trimmed.replace(/^[　 ]+/, "")}`)
     pendingBlank = true
     lastKind = "normal"
   }

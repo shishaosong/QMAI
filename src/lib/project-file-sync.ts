@@ -179,6 +179,11 @@ async function refreshAfterFileChanges(project: WikiProject, relativePaths: stri
 
   try {
     const content = await readFile(selected)
+    const currentContent = useWikiStore.getState().fileContent
+    if (currentContent && currentContent !== content) {
+      console.warn("[file-sync] 检测到编辑器有未保存内容，跳过文件刷新:", selected)
+      return
+    }
     useWikiStore.getState().setFileContent(content)
   } catch {
     useWikiStore.getState().setSelectedFile(null)

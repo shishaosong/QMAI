@@ -10,10 +10,6 @@ export interface LocalCliDetectResult {
   error: string | null
 }
 
-export interface LocalCliModelListResult {
-  models: string[]
-}
-
 function detectCommand(provider: LlmConfig["provider"]): "claude_cli_detect" | "codex_cli_detect" | null {
   if (provider === "claude-code") return "claude_cli_detect"
   if (provider === "codex-cli") return "codex_cli_detect"
@@ -27,10 +23,6 @@ export async function detectLocalCliConfig(provider: LlmConfig["provider"]): Pro
     return { installed: false, version: null, path: null, error: "仅桌面端支持本地 CLI 检测" }
   }
   return invoke<LocalCliDetectResult>(command)
-}
-
-export async function listCodexCliModels(): Promise<LocalCliModelListResult> {
-  return invoke<LocalCliModelListResult>("codex_cli_list_models")
 }
 
 export async function resolveRuntimeLocalCliConfig(config: LlmConfig): Promise<LlmConfig> {

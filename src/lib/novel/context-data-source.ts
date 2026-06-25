@@ -129,11 +129,7 @@ export class DataSourceRegistry {
       writingStyle: "",
       searchResults: "",
       graphSearchResults: "",
-      revisionFeedback: {
-        mustFix: [],
-        shouldImprove: [],
-        carryToNextChapter: [],
-      },
+      revisionFeedback: [],
       cognitionText: "",
       soulDoc: "",
       characterAuras: "",

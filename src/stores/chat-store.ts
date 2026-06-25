@@ -219,9 +219,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
     set((state) => {
       const convId = targetConvId ?? state.activeConversationId
       if (!convId) {
-        return {
-          streamingContents: {},
-        }
+        // 无目标会话时不操作，避免清空所有会话的流式状态
+        return {}
       }
 
       const newMessage: DisplayMessage = {

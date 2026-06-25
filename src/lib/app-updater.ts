@@ -66,8 +66,25 @@ export async function runAppUpdateFlow(bindings: UpdaterBindings) {
   // 调用安装，软件会在安装前自动退出
   try {
     await update.install()
-  } catch {
-    // 预期行为：软件在安装过程中会重启，这里的 catch 正常
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    // 正常退出关键词：软件在安装过程中重启属于预期行为
+    const normalExitKeywords = ["process exited", "disconnected", "closed"]
+    const isNormalExit = normalExitKeywords.some((kw) => msg.toLowerCase().includes(kw.toLowerCase()))
+    if (isNormalExit) return
+    console.error("安装更新失败：", error)
+    try {
+      await bindings.message(
+        `安装更新失败：${msg}\n\n请稍后重试或前往 GitHub 手动下载安装包。`,
+        {
+          title: "安装失败",
+          kind: "error",
+          okLabel: "知道了",
+        },
+      )
+    } catch {
+      console.error("显示安装失败对话框也失败了：", error)
+    }
   }
 }
 

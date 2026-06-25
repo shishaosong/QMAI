@@ -1,6 +1,5 @@
 ﻿import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat, type ChatMessage, type RequestOverrides, type StreamCallbacks } from "@/lib/llm-client"
-import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
 import { useWikiStore } from "@/stores/wiki-store"
 import { buildContextPack, contextPackToPrompt, type ContextPack } from "./context-engine"
 import { reviewChapter, type NovelReviewResult } from "./review-adapter"
@@ -603,7 +602,7 @@ async function collectModelText(
     combinedSignal,
     {
       ...requestOverrides,
-      reasoning: requestOverrides?.reasoning ?? resolveUserVisibleReasoning(config.reasoning),
+      reasoning: requestOverrides?.reasoning ?? config.reasoning,
     },
   )
 

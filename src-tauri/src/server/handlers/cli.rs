@@ -83,7 +83,6 @@ pub struct ClaudeCliSpawnReq {
     messages: Vec<claude_cli::ClaudeMessage>,
     #[serde(default)]
     isolate_local_config: bool,
-    project_path: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -98,7 +97,6 @@ pub struct CodexCliSpawnReq {
     prompt: String,
     #[serde(default)]
     isolate_local_config: bool,
-    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 }
 
@@ -128,7 +126,6 @@ pub async fn claude_cli_spawn(
         req.model,
         req.messages,
         req.isolate_local_config,
-        req.project_path,
     )
     .await
     {
@@ -166,7 +163,6 @@ pub async fn codex_cli_spawn(
         req.model,
         req.prompt,
         req.isolate_local_config,
-        req.project_path,
         req.timeout_minutes,
     )
     .await

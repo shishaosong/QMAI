@@ -3,7 +3,6 @@ import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, XCircle 
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
 import { Input } from "@/components/ui/input"
-import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type ReasoningConfig, type ReasoningMode, type SavedModel } from "@/stores/wiki-store"
 import { LLM_PRESETS, type LlmPreset } from "../llm-presets"
@@ -18,7 +17,6 @@ import { useBatchModelTest } from "../hooks/use-batch-model-test"
 import { ModelSelectInput } from "../model-select-input"
 import { SavedModelsManager } from "./saved-models-manager"
 import { CustomProviderCards } from "./custom-provider-cards"
-import { buildProviderModelRef, getLlmPresetById } from "../llm-preset-utils"
 
 export function LlmProviderSection() {
   const { t } = useTranslation()
@@ -27,7 +25,6 @@ export function LlmProviderSection() {
   const activePresetId = useWikiStore((s) => s.activePresetId)
   const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
   const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
-  const setAiChatModel = useWikiStore((s) => s.setAiChatModel)
   const llmConfig = useWikiStore((s) => s.llmConfig)
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
@@ -38,27 +35,18 @@ export function LlmProviderSection() {
   }
 
   async function persist(newConfigs: typeof providerConfigs, newActive: string | null) {
-    const { saveProviderConfigs, saveActivePresetId, saveLlmConfig, saveAiChatModel } = await import(
+    const { saveProviderConfigs, saveActivePresetId, saveLlmConfig } = await import(
       "@/lib/project-store"
     )
     await saveProviderConfigs(newConfigs)
     await saveActivePresetId(newActive)
     if (newActive) {
-      const preset = getLlmPresetById(newActive, newConfigs)
+      const preset = LLM_PRESETS.find((p) => p.id === newActive)
       if (preset) {
-        const override = newConfigs[newActive]
-        const resolved = resolveConfig(preset, override, llmConfig)
-        const chatModelRef = buildProviderModelRef(newActive, override, resolved.model)
+        const resolved = resolveConfig(preset, newConfigs[newActive], llmConfig)
         setLlmConfig(resolved)
-        if (chatModelRef) {
-          setAiChatModel(chatModelRef)
-          await saveAiChatModel(chatModelRef)
-        }
         await saveLlmConfig(resolved)
       }
-    } else {
-      setAiChatModel("")
-      await saveAiChatModel("")
     }
   }
 
@@ -69,7 +57,7 @@ export function LlmProviderSection() {
     persist(next, activePresetId).catch(() => {})
     // If this preset is active, refresh the resolved LlmConfig live.
     if (id === activePresetId) {
-      const preset = getLlmPresetById(id, next)
+      const preset = LLM_PRESETS.find((p) => p.id === id)
       if (preset) setLlmConfig(resolveConfig(preset, merged, llmConfig))
     }
     setSavedId(id)
@@ -181,7 +169,7 @@ function PresetRow({
   const [isModelSelectionExpanded, setIsModelSelectionExpanded] = useState(false)
   const savedModelsTextareaRef = useRef<HTMLTextAreaElement>(null)
   const { modelTestState, runBatchTest, retryFailed } = useBatchModelTest(t)
-  const hasConfig = !!apiKey || !!ov.baseUrl || !!ov.model || !!ov.name || !!ov.azureApiVersion || !!ov.azureModelFamily
+  const hasConfig = !!apiKey || !!ov.baseUrl || !!ov.model || !!ov.azureApiVersion || !!ov.azureModelFamily
   // Local CLI providers authenticate via their own existing login state
   // (inherited by the spawned subprocess), so no API key field is shown.
   // Ollama ditto for its local-only model.
@@ -502,7 +490,8 @@ function PresetRow({
           {needsApiKey && (
             <div className="space-y-2">
               <Label>{t("settings.sections.llm.apiKey")}</Label>
-              <SecretInput
+              <Input
+                type="password"
                 value={apiKey}
                 onChange={(e) => onChange({ apiKey: e.target.value })}
                 placeholder={

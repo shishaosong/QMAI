@@ -3,6 +3,20 @@ import type { ReviewItem } from "@/stores/review-store"
 import type { DisplayMessage, Conversation } from "@/stores/chat-store"
 import { normalizePath } from "@/lib/path-utils"
 
+function safeParseArray<T>(content: string, fieldName: string = "items"): T[] {
+  try {
+    const parsed = JSON.parse(content)
+    if (!Array.isArray(parsed)) {
+      console.warn(`persist: 解析数据不是数组，字段: ${fieldName}`)
+      return []
+    }
+    return parsed as T[]
+  } catch (err) {
+    console.error(`persist: JSON 解析失败，字段: ${fieldName}`, err)
+    return []
+  }
+}
+
 async function ensureDir(projectPath: string): Promise<void> {
   await createDirectory(`${projectPath}/.qmai`).catch(() => {})
   await createDirectory(`${projectPath}/.qmai/chats`).catch(() => {})
@@ -18,7 +32,7 @@ export async function loadReviewItems(projectPath: string): Promise<ReviewItem[]
   const pp = normalizePath(projectPath)
   try {
     const content = await readFile(`${pp}/.qmai/review.json`)
-    return JSON.parse(content) as ReviewItem[]
+    return safeParseArray<ReviewItem>(content, "reviewItems")
   } catch {
     return []
   }
@@ -32,7 +46,8 @@ interface PersistedChatData {
 export async function saveChatHistory(
   projectPath: string,
   conversations: Conversation[],
-  messages: DisplayMessage[]
+  messages: DisplayMessage[],
+  maxMessages?: number
 ): Promise<void> {
   const pp = normalizePath(projectPath)
   await ensureDir(pp)
@@ -52,8 +67,8 @@ export async function saveChatHistory(
   }
 
   for (const [convId, msgs] of byConversation) {
-    // Keep last 100 messages per conversation
-    const toSave = msgs.slice(-100)
+    // Keep last N messages per conversation
+    const toSave = msgs.slice(-(maxMessages || 100))
     await writeFile(
       `${pp}/.qmai/chats/${convId}.json`,
       JSON.stringify(toSave, null, 2)
@@ -66,13 +81,13 @@ export async function loadChatHistory(projectPath: string): Promise<PersistedCha
   try {
     // Try new format: separate files per conversation
     const convContent = await readFile(`${pp}/.qmai/conversations.json`)
-    const conversations = JSON.parse(convContent) as Conversation[]
+    const conversations = safeParseArray<Conversation>(convContent, "conversations")
 
     const allMessages: DisplayMessage[] = []
     for (const conv of conversations) {
       try {
         const msgContent = await readFile(`${pp}/.qmai/chats/${conv.id}.json`)
-        const msgs = JSON.parse(msgContent) as DisplayMessage[]
+        const msgs = safeParseArray<DisplayMessage>(msgContent, "messages")
         allMessages.push(...msgs)
       } catch {
         // Conversation file missing, skip
@@ -104,8 +119,12 @@ export async function loadChatHistory(projectPath: string): Promise<PersistedCha
       }
 
       // Old combined format
-      const data = parsed as PersistedChatData
-      return data
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        const data = parsed as PersistedChatData
+        return data
+      }
+      console.warn("persist: 聊天历史数据格式无效")
+      return { conversations: [], messages: [] }
     } catch {
       return { conversations: [], messages: [] }
     }

@@ -76,6 +76,7 @@ pub struct ImportResult {
 pub struct ProjectRestoreResult {
     pub id: String,
     pub path: String,
+    pub name: String,
     pub success: bool,
     pub error: Option<String>,
 }
@@ -98,8 +99,12 @@ pub struct BackupProgressPayload {
     pub message: String,
 }
 
-const PROJECT_SUBDIRS: &[&str] = &[".qmai", ".novel", "wiki", "book-analysis"];
-const PROJECT_FILES: &[&str] = &["soul.md"];
+const PROJECT_SUBDIRS: &[&str] = &[".qmai", ".novel", "book-analysis", "raw"];
+const PROJECT_FILES: &[&str] = &["soul.md", "schema.md", "purpose.md"];
+
+// 知识目录的可能名称（新版用 QM，旧版用 wiki），导出时统一以 wiki 名称存入 zip
+const KNOWLEDGE_DIR_CANDIDATES: &[&str] = &["QM", "wiki"];
+const KNOWLEDGE_ZIP_NAME: &str = "wiki";
 
 fn emit_progress(
     app: &tauri::AppHandle,
@@ -220,6 +225,35 @@ fn extract_dir_from_zip(
         }
 
         let dest_path = target_dir.join(relative);
+
+        // Zip Slip 防护：校验解压目标路径未逃逸出 target_dir
+        let canonical_target = target_dir.canonicalize()
+            .map_err(|e| format!("无法解析目标目录: {e}"))?;
+
+        // 逐组件规范化路径，检测 .. 是否逃逸出 target_dir（不依赖文件存在性）
+        let mut normalized_dest = canonical_target.clone();
+        for component in Path::new(relative).components() {
+            match component {
+                std::path::Component::ParentDir => {
+                    normalized_dest.pop();
+                    if !normalized_dest.starts_with(&canonical_target) {
+                        return Err(format!(
+                            "安全拦截：zip 条目 \"{}\" 试图写入目标目录之外的位置",
+                            name
+                        ));
+                    }
+                }
+                std::path::Component::CurDir => {}
+                other => normalized_dest.push(other),
+            }
+        }
+
+        if !normalized_dest.starts_with(&canonical_target) {
+            return Err(format!(
+                "安全拦截：zip 条目 \"{}\" 试图写入目标目录之外的位置 {}",
+                name, normalized_dest.display()
+            ));
+        }
 
         if name.ends_with('/') {
             fs::create_dir_all(&dest_path)
@@ -360,6 +394,23 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
         });
 
         let zip_prefix = format!("projects/{}", project.id);
+
+        // 导出知识目录（优先 QM，兼容 wiki），统一以 wiki 名称存入 zip
+        for knowledge_dir in KNOWLEDGE_DIR_CANDIDATES {
+            let knowledge_path = project_path.join(knowledge_dir);
+            if knowledge_path.exists() && knowledge_path.is_dir() {
+                let zip_sub_prefix = format!("{}/{}", zip_prefix, KNOWLEDGE_ZIP_NAME);
+                if let Err(e) =
+                    add_dir_to_zip(&mut zip, &knowledge_path, &zip_sub_prefix, &mut file_count)
+                {
+                    warnings.push(format!(
+                        "复制项目 {} 的知识目录({})失败: {}",
+                        project.name, knowledge_dir, e
+                    ));
+                }
+                break; // 只导出第一个找到的知识目录
+            }
+        }
 
         for subdir in PROJECT_SUBDIRS {
             let subdir_path = project_path.join(subdir);
@@ -522,11 +573,11 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
     );
 
     if need_projects {
-        let projects_to_restore: Vec<(String, String)> = match &params.strategy {
+        let projects_to_restore: Vec<(String, String, String)> = match &params.strategy {
             ImportStrategy::Full => {
                 manifest_projects
                     .iter()
-                    .map(|p| (p.id.clone(), p.path.clone()))
+                    .map(|p| (p.id.clone(), p.path.clone(), p.name.clone()))
                     .collect()
             }
             ImportStrategy::Selective => params
@@ -534,7 +585,14 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
                 .as_ref()
                 .map(|ps| {
                     ps.iter()
-                        .map(|p| (p.id.clone(), p.target_path.clone()))
+                        .map(|p| {
+                            let name = manifest_projects
+                                .iter()
+                                .find(|m| m.id == p.id)
+                                .map(|m| m.name.clone())
+                                .unwrap_or_else(|| "已恢复项目".to_string());
+                            (p.id.clone(), p.target_path.clone(), name)
+                        })
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -543,13 +601,13 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
         let total = projects_to_restore.len();
 
-        for (idx, (project_id, target_path)) in projects_to_restore.iter().enumerate() {
+        for (idx, (project_id, target_path, project_name)) in projects_to_restore.iter().enumerate() {
             on_progress(&BackupProgressPayload {
                 operation: "import".to_string(),
                 stage: "restoring".to_string(),
                 current: idx + 1,
                 total: total.max(1),
-                message: format!("正在恢复项目: {}", project_id),
+                message: format!("正在恢复项目: {}", project_name),
             });
 
             let zip_prefix = format!("projects/{}/", project_id);
@@ -560,9 +618,17 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
             match extract_dir_from_zip(&mut archive, &zip_prefix, target) {
                 Ok(_count) => {
+                    // 导入后自动迁移目录（wiki -> QM，.llm-wiki -> .qmai 等）
+                    if let Err(e) = crate::commands::project::migrate_project_dirs(target) {
+                        warnings.push(format!(
+                            "项目 {} 目录迁移失败: {}",
+                            project_name, e
+                        ));
+                    }
                     project_results.push(ProjectRestoreResult {
                         id: project_id.clone(),
                         path: target_path.clone(),
+                        name: project_name.clone(),
                         success: true,
                         error: None,
                     });
@@ -571,6 +637,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
                     project_results.push(ProjectRestoreResult {
                         id: project_id.clone(),
                         path: target_path.clone(),
+                        name: project_name.clone(),
                         success: false,
                         error: Some(e),
                     });
@@ -655,4 +722,65 @@ pub async fn import_backup(
 
         Ok(result)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    #[test]
+    fn test_extract_dir_rejects_path_traversal() {
+        let tmp = std::env::temp_dir().join("qmai_zipslip_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("evil.zip");
+        let zip_file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = ZipWriter::new(zip_file);
+        zip.start_file("prefix/../../../../evil.txt", SimpleFileOptions::default()).unwrap();
+        zip.write_all(b"malicious").unwrap();
+        zip.finish().unwrap();
+
+        let target = tmp.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+        let result = extract_dir_from_zip(&mut archive, "prefix/", &target);
+        assert!(result.is_err(), "应拒绝路径遍历条目");
+        let err = result.unwrap_err();
+        assert!(err.contains("安全拦截"), "错误信息应包含安全拦截: {}", err);
+
+        assert!(!tmp.join("evil.txt").exists(), "evil.txt 不应存在于临时目录");
+        assert!(!std::env::temp_dir().join("evil.txt").exists(), "evil.txt 不应存在于上级目录");
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_extract_dir_accepts_normal_paths() {
+        let tmp = std::env::temp_dir().join("qmai_zipslip_normal_test");
+        let _ = std::fs::remove_dir_all(&tmp);
+        std::fs::create_dir_all(&tmp).unwrap();
+
+        let zip_path = tmp.join("normal.zip");
+        let zip_file = std::fs::File::create(&zip_path).unwrap();
+        let mut zip = ZipWriter::new(zip_file);
+        zip.start_file("prefix/chapter1.md", SimpleFileOptions::default()).unwrap();
+        zip.write_all("# 第一章".as_bytes()).unwrap();
+        zip.start_file("prefix/sub/chapter2.md", SimpleFileOptions::default()).unwrap();
+        zip.write_all("# 第二章".as_bytes()).unwrap();
+        zip.finish().unwrap();
+
+        let target = tmp.join("target");
+        std::fs::create_dir_all(&target).unwrap();
+        let mut archive = zip::ZipArchive::new(std::fs::File::open(&zip_path).unwrap()).unwrap();
+        let count = extract_dir_from_zip(&mut archive, "prefix/", &target).unwrap();
+        assert_eq!(count, 2);
+        assert!(target.join("chapter1.md").exists());
+        assert!(target.join("sub/chapter2.md").exists());
+
+        std::fs::remove_dir_all(&tmp).ok();
+    }
 }

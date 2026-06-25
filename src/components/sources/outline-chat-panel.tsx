@@ -18,7 +18,6 @@ import { runDeepOutlineGeneration } from "@/lib/novel/deep-outline-generation"
 import { resolveNovelModel } from "@/lib/novel/model-resolver"
 import { createDeepThinkingStreamRenderer } from "@/lib/deep-thinking-stream"
 import { ChatInput } from "@/components/chat/chat-input"
-import { parseAgentResponse, type FileEditAction } from "@/lib/novel/agent-parser"
 import {
   buildWebResearchContext,
   collectWebResearch,
@@ -129,10 +128,11 @@ function OutlineAssistantMessage({ msg, index, isStreaming, streamingContent, ac
   // Parse for file edits
   const parsed = useMemo(() => {
     if (!answer) return { textContent: "", edits: [], hasEdits: false }
+    const { parseAgentResponse } = require("@/lib/novel/agent-parser") as typeof import("@/lib/novel/agent-parser")
     return parseAgentResponse(answer)
   }, [answer])
 
-  const handleApplyEdits = useCallback(async (edits: FileEditAction[]) => {
+  const handleApplyEdits = useCallback(async (edits: import("@/lib/novel/agent-parser").FileEditAction[]) => {
     if (!projectPath) return []
     const { applyFileEdits } = await import("@/lib/novel/agent-tools")
     const results = await applyFileEdits(projectPath, edits)

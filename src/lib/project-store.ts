@@ -619,6 +619,27 @@ export async function loadTheme(): Promise<"light" | "dark" | "deep-blue" | null
   return savedTheme ?? null
 }
 
+const UI_FONT_SIZE_SCALE_KEY = "uiFontSizeScale"
+const MAX_HISTORY_MESSAGES_KEY = "maxHistoryMessages"
+
+export async function saveUiFontSizeScale(scale: number, _projectId?: string, _projectPath?: string): Promise<void> {
+  const store = await getStore()
+  await store.set(UI_FONT_SIZE_SCALE_KEY, scale)
+  await store.save()
+}
+
+export async function saveMaxHistoryMessages(max: number, _projectId?: string, _projectPath?: string): Promise<void> {
+  const store = await getStore()
+  await store.set(MAX_HISTORY_MESSAGES_KEY, max)
+  await store.save()
+}
+
+export async function loadMaxHistoryMessages(_projectId?: string, _projectPath?: string): Promise<number | null> {
+  const store = await getStore()
+  const val = await store.get<number>(MAX_HISTORY_MESSAGES_KEY)
+  return val ?? null
+}
+
 function normalizeNovelConfig(
   config?: Partial<NovelConfig> | null,
 ): NovelConfig | null {

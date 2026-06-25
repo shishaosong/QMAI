@@ -28,10 +28,10 @@ import { computeContextBudget } from "@/lib/context-budget"
 import { getConversationTabTitle, sortConversationsByUpdatedAt } from "@/lib/workspace-layout"
 import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
 import { createDeepThinkingStreamRenderer } from "@/lib/deep-thinking-stream"
-import { resolveKnownModelConfig, resolveNovelModel } from "@/lib/novel/model-resolver"
-import { saveActivePresetId, saveAiChatModel, saveLlmConfig } from "@/lib/project-store"
+import { resolveNovelModel } from "@/lib/novel/model-resolver"
 import { resolveConfig } from "@/components/settings/preset-resolver"
-import { getLlmPresetById } from "@/components/settings/llm-preset-utils"
+import { LLM_PRESETS } from "@/components/settings/llm-presets"
+import { saveAiChatModel } from "@/lib/project-store"
 import {
   buildGoldenThreeChapterDirective,
   detectGoldenThreeChapterRequest,
@@ -77,7 +77,7 @@ async function loadEnabledDismantlingDirective(projectPath: string): Promise<str
   return ""
 }
 
-function ConversationTabs() {
+function ConversationTabs({ onAbortStream }: { onAbortStream: (convId: string) => void }) {
   const { t } = useTranslation()
   const novelMode = useWikiStore((s) => s.novelMode)
   const conversations = useChatStore((s) => s.conversations)
@@ -143,6 +143,8 @@ function ConversationTabs() {
                     className="rounded p-0.5 text-muted-foreground hover:text-destructive"
                     onClick={(e) => {
                       e.stopPropagation()
+                      // 先 abort 该会话的流式请求，防止后台继续运行
+                      onAbortStream(conv.id)
                       deleteConversation(conv.id)
                       const proj = useWikiStore.getState().project
                       if (proj) {
@@ -194,8 +196,6 @@ export function ChatPanel() {
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const aiChatModel = useWikiStore((s) => s.aiChatModel)
   const setAiChatModel = useWikiStore((s) => s.setAiChatModel)
-  const setLlmConfig = useWikiStore((s) => s.setLlmConfig)
-  const setActivePresetId = useWikiStore((s) => s.setActivePresetId)
   const chatEditModeEnabled = useWikiStore((s) => s.chatEditModeEnabled)
   const setChatEditModeEnabled = useWikiStore((s) => s.setChatEditModeEnabled)
   const selectedFile = useWikiStore((s) => s.selectedFile)
@@ -208,26 +208,6 @@ export function ChatPanel() {
   const soulDialogResolverRef = useRef<((confirmed: boolean) => void) | null>(null)
   const userScrolledUpRef = useRef(false)
   const lastScrollTopRef = useRef(0)
-
-  function handleChatModelChange(modelRef: string) {
-    setAiChatModel(modelRef)
-    void saveAiChatModel(modelRef)
-
-    const slashIdx = modelRef.indexOf("/")
-    if (slashIdx <= 0) return
-
-    const providerId = modelRef.slice(0, slashIdx)
-    const modelId = modelRef.slice(slashIdx + 1)
-    const override = providerConfigs[providerId]
-    const preset = getLlmPresetById(providerId, providerConfigs)
-    if (!preset || !override || override.enabled === false) return
-
-    const resolved = { ...resolveConfig(preset, override, llmConfig), model: modelId }
-    setActivePresetId(providerId)
-    setLlmConfig(resolved)
-    void saveActivePresetId(providerId)
-    void saveLlmConfig(resolved)
-  }
 
   const [chapterSaveStatus, setChapterSaveStatus] = useState<string>("")
   const [isSavingChapter, setIsSavingChapter] = useState(false)
@@ -307,6 +287,10 @@ export function ChatPanel() {
     }
   }, [project, selectedFile, t])
 
+  // 注意：组件卸载时不 abort 流式请求，允许 AI 在后台继续生成
+  // 聊天数据存在全局 Zustand store 中，切回来时仍可看到生成结果
+  // 删除会话时会单独 abort 该会话的请求（见 abortConversationStream）
+
   // Auto-scroll to bottom when messages change or streaming content updates
   // But stop if user manually scrolled up
   useEffect(() => {
@@ -336,7 +320,7 @@ export function ChatPanel() {
     }
     container.addEventListener("scroll", handleScroll)
     return () => container.removeEventListener("scroll", handleScroll)
-  }, [])
+  }, [activeConversationId])
 
   // Reset scroll lock when streaming ends or conversation changes
   useEffect(() => {
@@ -403,8 +387,51 @@ export function ChatPanel() {
       // AI 会话选中的 model 名（如 "deepseek-v3"）需要找到它所属的 provider
       // 重新计算 baseUrl/apiKey/apiMode，否则会沿用 activePresetId 的配置
       // 导致跨 provider 调用失败
-      const effectiveChatLlmConfig =
-        resolveKnownModelConfig(aiChatModel, llmConfig, providerConfigs) ?? llmConfig
+      let effectiveChatLlmConfig = llmConfig
+      if (aiChatModel.trim()) {
+        const targetModel = aiChatModel.trim()
+        // 优先按 "providerId/modelId" 格式精确匹配
+        const slashIdx = targetModel.indexOf("/")
+        if (slashIdx > 0) {
+          const providerId = targetModel.slice(0, slashIdx)
+          const modelId = targetModel.slice(slashIdx + 1)
+          const override = providerConfigs[providerId]
+          if (override?.savedModels?.some((m) => m.model === modelId)) {
+            const template =
+              LLM_PRESETS.find((p) => p.id === providerId) ??
+              LLM_PRESETS.find((p) => p.id === "custom")
+            if (template) {
+              effectiveChatLlmConfig = {
+                ...resolveConfig(template, override, llmConfig),
+                model: modelId,
+              }
+            }
+          } else {
+            effectiveChatLlmConfig = { ...llmConfig, model: modelId }
+          }
+        } else {
+          // 回退：按纯模型名匹配（兼容旧数据）
+          let matched = false
+          for (const [providerId, override] of Object.entries(providerConfigs)) {
+            if (override.savedModels?.some((m) => m.model === targetModel)) {
+              const template =
+                LLM_PRESETS.find((p) => p.id === providerId) ??
+                LLM_PRESETS.find((p) => p.id === "custom")
+              if (template) {
+                effectiveChatLlmConfig = {
+                  ...resolveConfig(template, override, llmConfig),
+                  model: targetModel,
+                }
+              }
+              matched = true
+              break
+            }
+          }
+          if (!matched) {
+            effectiveChatLlmConfig = { ...llmConfig, model: targetModel }
+          }
+        }
+      }
       const shouldUseEditMode = novelMode && chatEditModeEnabled && isChatEditRequest(text)
       const goldenThreeChapter = novelMode
         ? detectGoldenThreeChapterRequest(text, effectiveTaskRoute?.chapterNumber)
@@ -962,7 +989,8 @@ export function ChatPanel() {
       }
 
       const conversations = useChatStore.getState().conversations
-      const activeConv = conversations.find(c => c.id === activeConversationId)
+      // 使用 capturedConvId 而非闭包中的 activeConversationId，防止切换会话后取错会话
+      const activeConv = conversations.find(c => c.id === capturedConvId)
       const deAiMode = activeConv?.deAiMode ?? false
       if (deAiMode && llmMessages.length > 0) {
         const lastIdx = llmMessages.length - 1
@@ -1051,19 +1079,16 @@ export function ChatPanel() {
   }, [finalizeStream])
 
   const handleRegenerate = useCallback(async () => {
-    if (isStreaming) return
+    // 直接从 store 获取最新状态，避免闭包旧值
+    const storeState = useChatStore.getState()
+    if (storeState.streamingContents[storeState.activeConversationId ?? ""] !== undefined) return
     // Find the last user message in active conversation
-    const active = useChatStore.getState().getActiveMessages()
+    const active = storeState.getActiveMessages()
     const lastUserMsg = [...active].reverse().find((m) => m.role === "user")
     if (!lastUserMsg) return
     // Remove the last assistant reply, then re-send
     removeLastAssistantMessage()
-    // Small delay to let state update
-    await new Promise((r) => setTimeout(r, 50))
-    // Trigger send with the same text (handleSend will add a new user message,
-    // so also remove the original to avoid duplication)
-    // Actually: just call handleSend — but it adds a user message. To avoid dupe,
-    // we remove the last user message too and let handleSend re-add it.
+    // Zustand set 是同步的，无需延迟，直接读取最新状态
     const store = useChatStore.getState()
     const updatedActive = store.getActiveMessages()
     const lastUser = [...updatedActive].reverse().find((m) => m.role === "user")
@@ -1073,7 +1098,7 @@ export function ChatPanel() {
       }))
     }
     handleSend(lastUserMsg.content)
-  }, [isStreaming, removeLastAssistantMessage, handleSend])
+  }, [removeLastAssistantMessage, handleSend])
 
   const handleContinueNextChapter = useCallback(() => {
     if (isStreaming) return
@@ -1085,6 +1110,55 @@ export function ChatPanel() {
 
   const handleContinueUnfinished = useCallback(async (assistantMessage: DisplayMessage) => {
     if (isStreaming) return
+
+    // AI 会话选中的 model 名（如 "deepseek-v3"）需要找到它所属的 provider
+    // 重新计算 baseUrl/apiKey/apiMode，否则会沿用 activePresetId 的配置
+    // 导致跨 provider 调用失败
+    let effectiveChatLlmConfig = llmConfig
+    if (aiChatModel.trim()) {
+      const targetModel = aiChatModel.trim()
+      // 优先按 "providerId/modelId" 格式精确匹配
+      const slashIdx = targetModel.indexOf("/")
+      if (slashIdx > 0) {
+        const providerId = targetModel.slice(0, slashIdx)
+        const modelId = targetModel.slice(slashIdx + 1)
+        const override = providerConfigs[providerId]
+        if (override?.savedModels?.some((m) => m.model === modelId)) {
+          const template =
+            LLM_PRESETS.find((p) => p.id === providerId) ??
+            LLM_PRESETS.find((p) => p.id === "custom")
+          if (template) {
+            effectiveChatLlmConfig = {
+              ...resolveConfig(template, override, llmConfig),
+              model: modelId,
+            }
+          }
+        } else {
+          effectiveChatLlmConfig = { ...llmConfig, model: modelId }
+        }
+      } else {
+        // 回退：按纯模型名匹配（兼容旧数据）
+        let matched = false
+        for (const [providerId, override] of Object.entries(providerConfigs)) {
+          if (override.savedModels?.some((m) => m.model === targetModel)) {
+            const template =
+              LLM_PRESETS.find((p) => p.id === providerId) ??
+              LLM_PRESETS.find((p) => p.id === "custom")
+            if (template) {
+              effectiveChatLlmConfig = {
+                ...resolveConfig(template, override, llmConfig),
+                model: targetModel,
+              }
+            }
+            matched = true
+            break
+          }
+        }
+        if (!matched) {
+          effectiveChatLlmConfig = { ...llmConfig, model: targetModel }
+        }
+      }
+    }
 
     let convId = useChatStore.getState().activeConversationId
     if (!convId) {
@@ -1123,7 +1197,7 @@ export function ChatPanel() {
 
     try {
       const novelConfig = useWikiStore.getState().novelConfig
-      const writingConfig = resolveNovelModel(llmConfig, novelConfig, "writing")
+      const writingConfig = resolveNovelModel(effectiveChatLlmConfig, novelConfig, "writing")
 
       if (project && originalRequest?.trim() && persistedResume?.checkpoint) {
         const pp = normalizePath(project.path)
@@ -1139,7 +1213,7 @@ export function ChatPanel() {
             chapterNumber: resumeRoute?.chapterNumber,
             goldenThreeChapter: goldenResume?.enabled ? goldenResume : undefined,
             dismantlingReferenceDirective: dismantlingDirective,
-            llmConfig,
+            llmConfig: effectiveChatLlmConfig,
             resumeCheckpoint: persistedResume.checkpoint,
           },
           {
@@ -1299,7 +1373,7 @@ export function ChatPanel() {
         delete abortControllersRef.current[convId]
       }
     }
-  }, [isStreaming, createConversation, addMessage, startStreaming, setStreamingContent, llmConfig, finalizeStream])
+  }, [isStreaming, createConversation, addMessage, startStreaming, setStreamingContent, llmConfig, aiChatModel, providerConfigs, finalizeStream])
 
   const handleWriteToWiki = useCallback(async () => {
     if (!project) return
@@ -1319,9 +1393,15 @@ export function ChatPanel() {
   const hasAssistantMessages = activeMessages.some((m) => m.role === "assistant")
   const showWriteButton = mode === "ingest" && !isStreaming && hasAssistantMessages
 
+  // 删除会话时 abort 该会话的流式请求
+  const abortConversationStream = useCallback((convId: string) => {
+    abortControllersRef.current[convId]?.abort()
+    delete abortControllersRef.current[convId]
+  }, [])
+
   return (
     <div className="flex h-full flex-col overflow-hidden bg-background">
-      <ConversationTabs />
+      <ConversationTabs onAbortStream={abortConversationStream} />
 
       <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
         {!activeConversationId ? (
@@ -1432,7 +1512,10 @@ export function ChatPanel() {
                   <div className="flex items-center gap-2 flex-nowrap">
                     <ChatModelSelector
                       value={aiChatModel}
-                      onChange={handleChatModelChange}
+                      onChange={(model) => {
+                        setAiChatModel(model)
+                        void saveAiChatModel(model)
+                      }}
                     />
                   </div>
                 </div>

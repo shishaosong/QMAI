@@ -90,10 +90,20 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/book-analysis/export", post(handlers::book_analysis::export_book_analysis))
         // events — SSE
         .route("/events", get(handlers::events::sse_events))
-        .with_state(state);
+        .with_state(state.clone());
 
     Router::new()
         .nest("/api", api)
-        .layer(CorsLayer::permissive())
+        .layer(
+            CorsLayer::new()
+                .allow_origin(
+                    state.config.allowed_origins
+                        .iter()
+                        .filter_map(|o| o.parse().ok())
+                        .collect::<Vec<_>>(),
+                )
+                .allow_methods([axum::http::Method::GET, axum::http::Method::POST, axum::http::Method::OPTIONS])
+                .allow_headers([axum::http::header::CONTENT_TYPE])
+        )
         .fallback(static_files::serve_static)
 }

@@ -1,6 +1,5 @@
 import type { LlmConfig } from "@/stores/wiki-store"
 import { streamChat, type ChatMessage, type RequestOverrides, type StreamCallbacks } from "@/lib/llm-client"
-import { resolveUserVisibleReasoning } from "@/lib/user-visible-reasoning"
 
 export interface DeepOutlineGenerationInput {
   llmConfig: LlmConfig
@@ -121,7 +120,7 @@ async function collectModelText(
       },
     },
     signal,
-    { reasoning: resolveUserVisibleReasoning(config.reasoning) },
+    { reasoning: config.reasoning },
   )
 
   if (streamError) throw streamError

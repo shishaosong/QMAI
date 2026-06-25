@@ -101,23 +101,22 @@ export function mergeRevisionFeedback(
   })
 }
 
-export function buildRevisionDirectives(feedback: unknown): string {
-  const normalized = normalizeRevisionFeedbackPayload(feedback)
+export function buildRevisionDirectives(feedback: NovelRevisionFeedback): string {
   const sections: string[] = []
 
-  if (normalized.mustFix.length > 0) {
+  if (feedback.mustFix.length > 0) {
     sections.push(i18n.t("novel.revisionFeedback.mustFix"))
-    normalized.mustFix.forEach((item) => sections.push(`  - ${item}`))
+    feedback.mustFix.forEach((item) => sections.push(`  - ${item}`))
   }
 
-  if (normalized.shouldImprove.length > 0) {
+  if (feedback.shouldImprove.length > 0) {
     sections.push(i18n.t("novel.revisionFeedback.shouldImprove"))
-    normalized.shouldImprove.forEach((item) => sections.push(`  - ${item}`))
+    feedback.shouldImprove.forEach((item) => sections.push(`  - ${item}`))
   }
 
-  if (normalized.carryToNextChapter.length > 0) {
+  if (feedback.carryToNextChapter.length > 0) {
     sections.push(i18n.t("novel.revisionFeedback.carryToNextChapter"))
-    normalized.carryToNextChapter.forEach((item) => sections.push(`  - ${item}`))
+    feedback.carryToNextChapter.forEach((item) => sections.push(`  - ${item}`))
   }
 
   return sections.join("\n")
@@ -264,25 +263,6 @@ function dedupeRevisionFeedback(feedback: NovelRevisionFeedback): NovelRevisionF
   }
 }
 
-function normalizeRevisionFeedbackPayload(
-  feedback: unknown,
-): NovelRevisionFeedback {
-  if (!feedback || typeof feedback !== "object" || Array.isArray(feedback)) {
-    return createEmptyRevisionFeedback()
-  }
-  const parsed = feedback as Partial<Record<keyof NovelRevisionFeedback, unknown>>
-
-  return dedupeRevisionFeedback({
-    mustFix: revisionListFromUnknown(parsed.mustFix),
-    shouldImprove: revisionListFromUnknown(parsed.shouldImprove),
-    carryToNextChapter: revisionListFromUnknown(parsed.carryToNextChapter),
-  })
-}
-
-function revisionListFromUnknown(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : []
-}
-
 function uniqueNonEmpty(items: string[]): string[] {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)))
 }
@@ -306,9 +286,9 @@ function parseLegacyRevisionFeedback(value: unknown): NovelRevisionFeedback | nu
   if (!hasLegacyKeys) return null
 
   return dedupeRevisionFeedback({
-    mustFix: revisionListFromUnknown(parsed.mustFix),
-    shouldImprove: revisionListFromUnknown(parsed.shouldImprove),
-    carryToNextChapter: revisionListFromUnknown(parsed.carryToNextChapter),
+    mustFix: Array.isArray(parsed.mustFix) ? parsed.mustFix : [],
+    shouldImprove: Array.isArray(parsed.shouldImprove) ? parsed.shouldImprove : [],
+    carryToNextChapter: Array.isArray(parsed.carryToNextChapter) ? parsed.carryToNextChapter : [],
   })
 }
 

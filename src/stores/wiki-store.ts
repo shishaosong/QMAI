@@ -382,8 +382,6 @@ export interface SavedModel {
  */
 export interface ProviderOverride {
   label?: string             // 自定义配置的显示名称
-  name?: string
-  createdAt?: number
   apiKey?: string
   model?: string
   baseUrl?: string           // customEndpoint for custom presets, ollamaUrl for ollama

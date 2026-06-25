@@ -6,7 +6,7 @@ import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
 import { serverEvents } from "@/lib/server-events"
 import { listDirectory, openProject, fileExists } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId, saveAiChatModel } from "@/lib/project-store"
+import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId } from "@/lib/project-store"
 import { loadNovelProjectMeta } from "@/lib/novel/project-meta"
 import { loadReviewItems, loadChatHistory } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
@@ -19,8 +19,8 @@ import { WelcomeScreen } from "@/components/project/welcome-screen"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 import { formatAppTitle } from "@/lib/app-title"
 import { resetProjectState, resetProjectStores } from "@/lib/reset-project-state"
+import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
-import { buildProviderModelRef, getLlmPresetById, isKnownProviderModelRef } from "@/components/settings/llm-preset-utils"
 import { loadEnvLlmDefault } from "@/lib/env-llm-defaults"
 import { toast } from "@/lib/toast"
 import type { WikiProject } from "@/types/wiki"
@@ -106,20 +106,13 @@ function App() {
           // `llmConfig` snapshot from a previous launch would keep the
           // old value. Overrides still win, so an explicit user choice
           // is preserved.
-          const preset = getLlmPresetById(savedActivePreset, savedProviderConfigs ?? {})
+          const preset = LLM_PRESETS.find((p) => p.id === savedActivePreset)
           if (preset) {
             const currentFallback = useWikiStore.getState().llmConfig
             const override = (savedProviderConfigs ?? {})[savedActivePreset]
             const resolved = resolveConfig(preset, override, currentFallback)
             useWikiStore.getState().setLlmConfig(resolved)
             await saveLlmConfig(resolved)
-
-            const activeModelRef = buildProviderModelRef(savedActivePreset, override, resolved.model)
-            const currentAiChatModel = useWikiStore.getState().aiChatModel
-            if (activeModelRef && !isKnownProviderModelRef(currentAiChatModel, savedProviderConfigs ?? {})) {
-              useWikiStore.getState().setAiChatModel(activeModelRef)
-              await saveAiChatModel(activeModelRef)
-            }
           }
         } else if (envLlmDefault) {
           useWikiStore.getState().setActivePresetId(envLlmDefault.activePresetId)
@@ -150,12 +143,12 @@ function App() {
           try {
             const proj = await openProject(lastProject.path)
             await handleProjectOpened(proj)
-          } catch {
-            // Last project no longer valid
+          } catch (err) {
+            console.error("打开上次项目失败:", err)
           }
         }
-      } catch {
-        // ignore init errors
+      } catch (err) {
+        console.error("应用初始化失败:", err)
       } finally {
         setLoading(false)
         void checkForAppUpdate()
@@ -239,8 +232,8 @@ function App() {
           lastScan: null,
         })
       }
-    } catch {
-      // ignore
+    } catch (err) {
+      console.error("加载定时导入配置失败:", err)
     }
 
     if (isTauri()) {
@@ -297,8 +290,8 @@ function App() {
       if (savedReview.length > 0) {
         useReviewStore.getState().setItems(savedReview)
       }
-    } catch {
-      // ignore, start fresh
+    } catch (err) {
+      console.error("加载审查项失败:", err)
     }
     try {
       const savedChat = await loadChatHistory(proj.path)
@@ -310,8 +303,8 @@ function App() {
           useChatStore.getState().setActiveConversation(sorted[0].id)
         }
       }
-    } catch {
-      // ignore, start fresh
+    } catch (err) {
+      console.error("加载聊天历史失败:", err)
     }
   }
 

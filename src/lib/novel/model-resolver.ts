@@ -1,81 +1,44 @@
 import { useWikiStore, type LlmConfig, type NovelConfig, type ProviderOverride } from "@/stores/wiki-store"
+import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
-import {
-  buildProviderModelRef,
-  getLlmPresetById,
-  isProviderConfigEnabled,
-  providerConfigHasModel,
-} from "@/components/settings/llm-preset-utils"
 
 export type NovelTaskType = "writing" | "review" | "summary" | "extract" | "lint"
-
-export function resolveKnownModelConfig(
-  targetModel: string,
-  baseConfig: LlmConfig,
-  providerConfigs: Record<string, ProviderOverride>,
-): LlmConfig | null {
-  const target = targetModel.trim()
-  if (!target) return null
-
-  const slashIdx = target.indexOf("/")
-  if (slashIdx > 0) {
-    const providerId = target.slice(0, slashIdx)
-    const modelId = target.slice(slashIdx + 1)
-    const override = providerConfigs[providerId]
-    if (!providerConfigHasModel(override, modelId)) return null
-
-    const preset = getLlmPresetById(providerId, providerConfigs)
-    if (!preset) return null
-
-    return { ...resolveConfig(preset, override, baseConfig), model: modelId }
-  }
-
-  for (const [providerId, override] of Object.entries(providerConfigs)) {
-    if (!isProviderConfigEnabled(override)) continue
-    if (!providerConfigHasModel(override, target)) continue
-
-    const preset = getLlmPresetById(providerId, providerConfigs)
-    if (preset) {
-      return { ...resolveConfig(preset, override, baseConfig), model: target }
-    }
-  }
-
-  return null
-}
 
 export function resolveModelConfig(
   targetModel: string,
   baseConfig: LlmConfig,
   providerConfigs: Record<string, ProviderOverride>,
 ): LlmConfig {
-  const known = resolveKnownModelConfig(targetModel, baseConfig, providerConfigs)
-  if (known) return known
-
-  // Provider-scoped references should never be sent as bare models to
-  // whichever endpoint happens to be active. That is how stale Codex/Claude
-  // selections leaked into custom API calls.
-  if (targetModel.includes("/")) return baseConfig
-
-  const model = targetModel.trim()
-  return model ? { ...baseConfig, model } : baseConfig
-}
-
-function providerIdFromModelRef(modelRef: string): string | null {
-  const slashIdx = modelRef.trim().indexOf("/")
-  return slashIdx > 0 ? modelRef.trim().slice(0, slashIdx) : null
-}
-
-function modelBelongsToActivePreset(modelRef: string, activePresetId: string | null): boolean {
-  const target = modelRef.trim()
-  if (!target) return false
-  const providerId = providerIdFromModelRef(target)
-  if (!activePresetId) return providerId === null
-  return providerId === null || providerId === activePresetId
+  // 优先按 "providerId/modelId" 格式精确匹配
+  const slashIdx = targetModel.indexOf("/")
+  if (slashIdx > 0) {
+    const providerId = targetModel.slice(0, slashIdx)
+    const modelId = targetModel.slice(slashIdx + 1)
+    const override = providerConfigs[providerId]
+    if (override?.savedModels?.some((m) => m.model === modelId)) {
+      const template = LLM_PRESETS.find((p) => p.id === providerId) ?? LLM_PRESETS.find((p) => p.id === "custom")
+      if (template) {
+        return { ...resolveConfig(template, override, baseConfig), model: modelId }
+      }
+    }
+    return { ...baseConfig, model: modelId }
+  }
+  // 回退：按纯模型名匹配（兼容旧数据）
+  for (const [providerId, override] of Object.entries(providerConfigs)) {
+    if (override.savedModels?.some((m) => m.model === targetModel)) {
+      const template = LLM_PRESETS.find((p) => p.id === providerId) ?? LLM_PRESETS.find((p) => p.id === "custom")
+      if (template) {
+        return { ...resolveConfig(template, override, baseConfig), model: targetModel }
+      }
+    }
+  }
+  return { ...baseConfig, model: targetModel }
 }
 
 /**
- * Resolve the default model for background tasks such as memory and character extraction.
- * Priority: defaultLlmModel > aiChatModel > baseConfig.
+ * 解析后台任务的默认模型。
+ * 优先级：defaultLlmModel > aiChatModel > baseConfig
+ * 用于提取记忆、提取角色等后台 AI 任务。
  */
 export function resolveDefaultModel(baseConfig: LlmConfig): LlmConfig {
   const { providerConfigs, defaultLlmModel, aiChatModel } = useWikiStore.getState()
@@ -92,38 +55,22 @@ export function resolveNovelModel(
   taskType: NovelTaskType,
 ): LlmConfig {
   const modelMap: Record<NovelTaskType, string> = {
-    writing: "",
+    writing: "", // 写作模型已移除，始终使用 AI 会话当前模型
     review: novelConfig.reviewModel,
     summary: novelConfig.summaryModel,
     extract: novelConfig.extractModel,
     lint: novelConfig.reviewModel,
   }
 
-  const { providerConfigs, defaultLlmModel, aiChatModel, activePresetId } = useWikiStore.getState()
+  const { providerConfigs, defaultLlmModel, aiChatModel } = useWikiStore.getState()
 
   const taskModel = modelMap[taskType]
   if (!taskModel) {
-    const defaultConfig = defaultLlmModel?.trim()
-      ? resolveModelConfig(defaultLlmModel, llmConfig, providerConfigs)
-      : null
-    if (defaultConfig) return defaultConfig
-
-    if (modelBelongsToActivePreset(aiChatModel, activePresetId)) {
-      const sessionConfig = resolveKnownModelConfig(aiChatModel, llmConfig, providerConfigs)
-      if (sessionConfig) return sessionConfig
+    // 没有指定任务模型时：优先使用 AI 会话当前模型，再回退到默认模型
+    const targetModel = aiChatModel?.trim() || defaultLlmModel?.trim()
+    if (targetModel) {
+      return resolveModelConfig(targetModel, llmConfig, providerConfigs)
     }
-
-    const activeModelRef = buildProviderModelRef(
-      activePresetId,
-      activePresetId ? providerConfigs[activePresetId] : undefined,
-      llmConfig.model,
-    )
-    const activeConfig = resolveKnownModelConfig(activeModelRef, llmConfig, providerConfigs)
-    if (activeConfig) return activeConfig
-
-    const writingConfig = resolveKnownModelConfig(novelConfig.writingModel, llmConfig, providerConfigs)
-    if (writingConfig) return writingConfig
-
     return llmConfig
   }
 

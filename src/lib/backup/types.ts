@@ -41,6 +41,7 @@ export interface ImportParams {
 export interface ProjectRestoreResult {
   id: string
   path: string
+  name: string
   success: boolean
   error: string | null
 }

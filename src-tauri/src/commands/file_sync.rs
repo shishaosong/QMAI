@@ -289,18 +289,20 @@ pub fn start_project_file_watcher(
         let root_for_overflow = root.clone();
         let root_for_error = root.clone();
         let mut watcher = RecommendedWatcher::new(
-            move |res: notify::Result<Event>| match res {
-                Ok(event) => {
-                    for path in event.paths {
-                        if tx_for_watcher.try_send(path).is_err() {
-                            let _ = tx_for_watcher.try_send(root_for_overflow.clone());
-                            break;
+            move |res: notify::Result<Event>| {
+                match res {
+                    Ok(event) => {
+                        for path in event.paths {
+                            if tx_for_watcher.try_send(path).is_err() {
+                                let _ = tx_for_watcher.try_send(root_for_overflow.clone());
+                                break;
+                            }
                         }
                     }
-                }
-                Err(err) => {
-                    eprintln!("[file-sync] watcher error; scheduling rescan: {err}");
-                    let _ = tx_for_watcher.try_send(root_for_error.clone());
+                    Err(err) => {
+                        eprintln!("[file-sync] watcher error; scheduling rescan: {err}");
+                        let _ = tx_for_watcher.try_send(root_for_error.clone());
+                    }
                 }
             },
             Config::default(),
@@ -462,12 +464,7 @@ fn handle_changed_paths(
         if path.is_dir() {
             for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
                 if entry.file_type().is_file() && !is_app_write_ignored(entry.path()) {
-                    if let Some(rel) = relative_watch_path(
-                        root,
-                        entry.path(),
-                        &rules,
-                        entry.metadata().ok().map(|m| m.len()),
-                    ) {
+                    if let Some(rel) = relative_watch_path(root, entry.path(), &rules, entry.metadata().ok().map(|m| m.len())) {
                         rels.insert(rel);
                     }
                 }
@@ -513,13 +510,7 @@ fn maybe_periodic_rescan(
     }
     *last_periodic_rescan = now_ms();
     let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
-        rescan_watch_roots(
-            app,
-            root,
-            project_id,
-            source_watch_config,
-            watcher_generation,
-        )
+        rescan_watch_roots(app, root, project_id, source_watch_config, watcher_generation)
     }));
     match result {
         Ok(Ok(())) => {}
@@ -570,12 +561,7 @@ fn collect_known_paths(
     if path.is_dir() {
         for entry in WalkDir::new(path).into_iter().filter_map(Result::ok) {
             if entry.file_type().is_file() {
-                if let Some(rel) = relative_watch_path(
-                    root,
-                    entry.path(),
-                    rules,
-                    entry.metadata().ok().map(|m| m.len()),
-                ) {
+                if let Some(rel) = relative_watch_path(root, entry.path(), rules, entry.metadata().ok().map(|m| m.len())) {
                     rels.insert(rel);
                 }
             }
@@ -636,12 +622,7 @@ fn enqueue_rescan_changes(
     let mut rels = BTreeSet::<String>::new();
     for entry in WalkDir::new(root).into_iter().filter_map(Result::ok) {
         if entry.file_type().is_file() {
-            if let Some(rel) = relative_watch_path(
-                root,
-                entry.path(),
-                &rules,
-                entry.metadata().ok().map(|m| m.len()),
-            ) {
+            if let Some(rel) = relative_watch_path(root, entry.path(), &rules, entry.metadata().ok().map(|m| m.len())) {
                 rels.insert(rel);
             }
         }
@@ -668,33 +649,20 @@ fn enqueue_rescan_changes_for_prefixes(
     for prefix in prefixes {
         let path = root.join(prefix);
         if path.is_file() {
-            if let Some(rel) = relative_watch_path(
-                root,
-                &path,
-                &rules,
-                fs::metadata(&path).ok().map(|m| m.len()),
-            ) {
+            if let Some(rel) = relative_watch_path(root, &path, &rules, fs::metadata(&path).ok().map(|m| m.len())) {
                 let old = snapshot.files.get(&rel);
                 let fast = read_meta_fast(root, &rel)?;
-                if old.map(|m| (m.size, m.mtime_ms)) != fast.as_ref().map(|m| (m.size, m.mtime_ms))
-                {
+                if old.map(|m| (m.size, m.mtime_ms)) != fast.as_ref().map(|m| (m.size, m.mtime_ms)) {
                     rels.insert(rel);
                 }
             }
         } else if path.exists() {
             for entry in WalkDir::new(&path).into_iter().filter_map(Result::ok) {
                 if entry.file_type().is_file() {
-                    if let Some(rel) = relative_watch_path(
-                        root,
-                        entry.path(),
-                        &rules,
-                        entry.metadata().ok().map(|m| m.len()),
-                    ) {
+                    if let Some(rel) = relative_watch_path(root, entry.path(), &rules, entry.metadata().ok().map(|m| m.len())) {
                         let old = snapshot.files.get(&rel);
                         let fast = read_meta_fast(root, &rel)?;
-                        if old.map(|m| (m.size, m.mtime_ms))
-                            != fast.as_ref().map(|m| (m.size, m.mtime_ms))
-                        {
+                        if old.map(|m| (m.size, m.mtime_ms)) != fast.as_ref().map(|m| (m.size, m.mtime_ms)) {
                             rels.insert(rel);
                         }
                     }
@@ -811,11 +779,7 @@ fn upsert_task(
     });
 }
 
-fn process_queue(
-    app: &AppHandle,
-    root: &Path,
-    project_id: &str,
-) -> Result<Vec<FileChangeTask>, String> {
+fn process_queue(app: &AppHandle, root: &Path, project_id: &str) -> Result<Vec<FileChangeTask>, String> {
     process_queue_inner(
         root,
         project_id,
@@ -1112,7 +1076,9 @@ fn should_watch_rel(rel: &str, rules: &SourceWatchRules) -> bool {
     }
     if rel.starts_with("raw/sources/") {
         let ext = extension_of(name);
-        if !ext.is_empty() && rules.exclude_extensions.contains(ext) {
+        if !ext.is_empty()
+            && rules.exclude_extensions.contains(ext)
+        {
             return false;
         }
         if !rules.include_extensions.is_empty()
@@ -1254,7 +1220,8 @@ fn emit_changed_batch(app: &AppHandle, project_id: &str, tasks: Vec<FileChangeTa
 }
 
 fn ensure_sync_dir(root: &Path) -> Result<(), String> {
-    fs::create_dir_all(root.join(".qmai")).map_err(|e| format!("Failed to create .qmai: {e}"))
+    fs::create_dir_all(root.join(".qmai"))
+        .map_err(|e| format!("Failed to create .qmai: {e}"))
 }
 
 fn read_snapshot(root: &Path) -> Result<FileSnapshot, String> {
@@ -1308,9 +1275,7 @@ fn write_json<T: Serialize>(path: PathBuf, value: &T) -> Result<(), String> {
         .unwrap_or_else(|| "file-sync.json".to_string());
     let tmp_path = path.with_file_name(format!(
         ".{file_name}.{}.tmp",
-        chrono::Utc::now()
-            .timestamp_nanos_opt()
-            .unwrap_or_else(now_ms)
+        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_else(now_ms)
     ));
     fs::write(&tmp_path, text)
         .map_err(|e| format!("Failed to write '{}': {e}", tmp_path.display()))?;
@@ -1863,8 +1828,7 @@ mod tests {
         fs::remove_file(root.join(old)).unwrap();
         fs::write(root.join(new), "new").unwrap();
 
-        enqueue_rescan_changes_for_prefixes(&root, "p1", &["raw/sources"], &default_watch_config())
-            .unwrap();
+        enqueue_rescan_changes_for_prefixes(&root, "p1", &["raw/sources"], &default_watch_config()).unwrap();
         let queue = read_queue(&root).unwrap();
         let by_path = queue
             .tasks
@@ -1959,15 +1923,9 @@ mod tests {
         let rules = SourceWatchRules::new(&config);
         assert!(should_watch_rel("raw/sources/document.docx", &rules));
         assert!(should_watch_rel("wiki/concepts/topic.md", &rules));
-        assert!(!should_watch_rel(
-            ".llm-wiki/file-change-queue.json",
-            &rules
-        ));
+        assert!(!should_watch_rel(".llm-wiki/file-change-queue.json", &rules));
         assert!(!should_watch_rel("raw/sources/~$Document.docx", &rules));
-        assert!(!should_watch_rel(
-            "raw/sources/.~lock.Document.odt#",
-            &rules
-        ));
+        assert!(!should_watch_rel("raw/sources/.~lock.Document.odt#", &rules));
         assert!(!should_watch_rel("raw/sources/Thumbs.db", &rules));
         assert!(!should_watch_rel("raw/sources/desktop.ini", &rules));
         assert!(!should_watch_rel("raw/sources/download.crdownload", &rules));
@@ -1989,10 +1947,7 @@ mod tests {
         assert!(should_watch_rel("raw/sources/final.md", &rules));
         assert!(!should_watch_rel("raw/sources/data.json", &rules));
         assert!(!should_watch_rel("raw/sources/drafts/final.md", &rules));
-        assert!(!should_watch_rel(
-            "raw/sources/subdir/drafts/final.md",
-            &rules
-        ));
+        assert!(!should_watch_rel("raw/sources/subdir/drafts/final.md", &rules));
         assert!(!should_watch_rel("raw/sources/report.private.md", &rules));
         assert!(should_watch_rel("wiki/index.md", &rules));
     }
@@ -2009,10 +1964,7 @@ mod tests {
         let config = normalize_source_watch_config(Some(config));
         let rules = SourceWatchRules::new(&config);
 
-        assert_eq!(
-            relative_watch_path(&root, &root.join(rel), &rules, None),
-            None
-        );
+        assert_eq!(relative_watch_path(&root, &root.join(rel), &rules, None), None);
 
         let _ = fs::remove_dir_all(root);
     }

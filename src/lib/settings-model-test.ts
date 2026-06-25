@@ -5,8 +5,6 @@ import { fetchLlmModelList } from "@/lib/settings-model-list"
 import type { EmbeddingConfig, LlmConfig, RerankConfig } from "@/stores/wiki-store"
 
 const TEST_TIMEOUT_MS = 30_000
-const LOCAL_CLI_TEST_TIMEOUT_MS = 3 * 60_000
-const MAX_LOCAL_CLI_TEST_TIMEOUT_MS = 10 * 60_000
 
 export interface LlmModelTestResult {
   model: string
@@ -95,7 +93,6 @@ async function runChatModelTest(config: LlmConfig, prompt: string): Promise<LlmM
   const resolved = await resolveChatModelConfig(config)
   let content = ""
   let streamError: Error | null = null
-  const timeoutMs = resolveModelTestTimeoutMs(resolved.config)
 
   await streamChat(
     resolved.config,
@@ -109,7 +106,7 @@ async function runChatModelTest(config: LlmConfig, prompt: string): Promise<LlmM
         streamError = error
       },
     },
-    AbortSignal.timeout(timeoutMs),
+    AbortSignal.timeout(TEST_TIMEOUT_MS),
     {
       temperature: 0,
       max_tokens: 80,
@@ -129,17 +126,6 @@ async function runChatModelTest(config: LlmConfig, prompt: string): Promise<LlmM
     model: resolved.model,
     content: trimmed,
   }
-}
-
-function resolveModelTestTimeoutMs(config: LlmConfig): number {
-  if (config.provider === "codex-cli") {
-    const configuredMs = Math.max(1, Math.min(10, config.codexCliTimeoutMinutes ?? 10)) * 60_000
-    return Math.max(LOCAL_CLI_TEST_TIMEOUT_MS, Math.min(configuredMs, MAX_LOCAL_CLI_TEST_TIMEOUT_MS))
-  }
-  if (config.provider === "claude-code") {
-    return LOCAL_CLI_TEST_TIMEOUT_MS
-  }
-  return TEST_TIMEOUT_MS
 }
 
 function extractJsonObject(raw: string): string {
