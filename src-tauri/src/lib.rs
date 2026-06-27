@@ -142,6 +142,7 @@ pub fn run() {
             commands::vectorstore::vector_legacy_row_count,
             commands::vectorstore::vector_drop_legacy,
             commands::claude_cli::claude_cli_detect,
+            commands::claude_cli::claude_cli_list_models,
             commands::claude_cli::claude_cli_spawn,
             commands::claude_cli::claude_cli_kill,
             commands::codex_cli::codex_cli_detect,

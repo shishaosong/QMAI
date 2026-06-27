@@ -29,9 +29,18 @@ use tokio::sync::Mutex;
 
 use super::cli_resolver::find_cli_command;
 use super::local_cli_config::{
-    apply_local_cli_environment, read_claude_local_config, resolve_home_dir, LocalCliConfigInfo,
+    apply_local_cli_environment, apply_project_local_cli_environment, read_claude_local_config,
+    resolve_cli_project_dir, resolve_home_dir, LocalCliConfigInfo,
 };
 
+const CLAUDE_CLI_KNOWN_MODEL_ALIASES: &[&str] = &["fable", "opus", "sonnet"];
+const CLAUDE_CLI_KNOWN_MODELS: &[&str] = &[
+    "claude-opus-4-7",
+    "claude-opus-4-6",
+    "claude-sonnet-4-6",
+    "claude-sonnet-4-5-20250929",
+    "claude-haiku-4-5-20251001",
+];
 // ── Event emitter abstraction ─────────────────────────────────────
 // Allows both Tauri (app.emit) and the standalone server (broadcast
 // channel) to share the same spawn logic.
@@ -89,6 +98,11 @@ pub struct DetectResult {
     /// quarantined on macOS, spawn failed, etc). The frontend shows this
     /// verbatim in the status pill.
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ModelListResult {
+    models: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -255,6 +269,49 @@ pub async fn claude_cli_detect() -> Result<DetectResult, String> {
     do_claude_cli_detect().await
 }
 
+pub async fn do_claude_cli_list_models(
+    project_path: Option<String>,
+) -> Result<ModelListResult, String> {
+    let local_config = read_current_claude_local_config();
+    let claude = find_claude_command().await?;
+    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
+
+    let mut cmd = Command::new(&claude);
+    suppress_windows_console(&mut cmd);
+    apply_local_cli_environment(&mut cmd);
+    apply_project_local_cli_environment(&mut cmd, project_dir.as_deref());
+    if let Some(dir) = &project_dir {
+        cmd.current_dir(dir);
+    }
+    let output = tokio::time::timeout(Duration::from_secs(5), cmd.arg("--help").output())
+        .await
+        .map_err(|_| "`claude --help` timed out after 5s".to_string())?
+        .map_err(|error| format!("Failed to run `claude --help`: {error}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("`claude --help` exited with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    let help = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    Ok(ModelListResult {
+        models: build_claude_model_list(local_config.model.as_deref(), &help),
+    })
+}
+
+#[tauri::command]
+pub async fn claude_cli_list_models(project_path: Option<String>) -> Result<ModelListResult, String> {
+    do_claude_cli_list_models(project_path).await
+}
+
 /// Spawn `claude -p --output-format stream-json --input-format stream-json
 /// --verbose --model <model>` and pipe stdout back via the given emitter.
 /// Closes stdin after writing the serialized history so claude starts
@@ -268,6 +325,7 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
     model: String,
     messages: Vec<ClaudeMessage>,
     isolate_local_config: bool,
+    project_path: Option<String>,
 ) -> Result<(), String> {
     // Build the turn list: fold any system messages into a preamble on
     // the first user turn rather than using a CLI flag, because
@@ -308,9 +366,14 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
         .collect();
 
     let claude = find_claude_command().await?;
+    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
     let mut cmd = Command::new(&claude);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
+    apply_project_local_cli_environment(&mut cmd, project_dir.as_deref());
+    if let Some(dir) = &project_dir {
+        cmd.current_dir(dir);
+    }
     cmd.args(build_claude_cli_args(&model, isolate_local_config));
 
     cmd.stdin(Stdio::piped())
@@ -435,9 +498,19 @@ pub async fn claude_cli_spawn(
     model: String,
     messages: Vec<ClaudeMessage>,
     isolate_local_config: bool,
+    project_path: Option<String>,
 ) -> Result<(), String> {
     let emitter = TauriCliEmitter::new(app);
-    do_claude_cli_spawn(&state, emitter, stream_id, model, messages, isolate_local_config).await
+    do_claude_cli_spawn(
+        &state,
+        emitter,
+        stream_id,
+        model,
+        messages,
+        isolate_local_config,
+        project_path,
+    )
+    .await
 }
 
 fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
@@ -475,6 +548,36 @@ fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String>
 fn read_current_claude_local_config() -> LocalCliConfigInfo {
     let home = resolve_home_dir();
     read_claude_local_config(home.as_deref())
+}
+
+fn push_unique_model(models: &mut Vec<String>, model: &str) {
+    let trimmed = model.trim();
+    if trimmed.is_empty() || models.iter().any(|existing| existing == trimmed) {
+        return;
+    }
+    models.push(trimmed.to_string());
+}
+
+fn build_claude_model_list(local_model: Option<&str>, help: &str) -> Vec<String> {
+    let mut models = Vec::new();
+
+    if let Some(model) = local_model {
+        push_unique_model(&mut models, model);
+    }
+
+    for model in CLAUDE_CLI_KNOWN_MODELS {
+        push_unique_model(&mut models, model);
+    }
+
+    for alias in CLAUDE_CLI_KNOWN_MODEL_ALIASES {
+        if help.contains(alias) {
+            push_unique_model(&mut models, alias);
+        }
+    }
+
+    models.sort();
+    models.dedup();
+    models
 }
 
 /// Kill a running child registered under `stream_id`. Called on
@@ -577,5 +680,19 @@ mod tests {
     fn claude_args_skip_model_flag_when_model_is_empty() {
         let args = build_claude_cli_args("", false);
         assert!(!args.contains(&"--model".to_string()));
+    }
+
+    #[test]
+    fn claude_model_list_includes_local_model_known_models_and_help_aliases() {
+        let models = build_claude_model_list(
+            Some("my-custom-claude"),
+            "--model <model> Provide an alias for the latest model, e.g. 'fable', 'opus', or 'sonnet'.",
+        );
+
+        assert!(models.contains(&"my-custom-claude".to_string()));
+        assert!(models.contains(&"claude-sonnet-4-6".to_string()));
+        assert!(models.contains(&"fable".to_string()));
+        assert!(models.contains(&"opus".to_string()));
+        assert!(models.contains(&"sonnet".to_string()));
     }
 }

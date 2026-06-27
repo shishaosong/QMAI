@@ -131,14 +131,14 @@ export const httpExtract = {
 export const httpCli = {
   claudeDetect: () =>
     apiCall<{ installed: boolean; path?: string }>("/cli/claude-detect", {}),
-  claudeSpawn: (streamId: string, model: string, messages: unknown[], isolateLocalConfig: boolean) =>
-    apiCall<void>("/cli/claude-spawn", { streamId, model, messages, isolateLocalConfig }),
+  claudeSpawn: (streamId: string, model: string, messages: unknown[], isolateLocalConfig: boolean, projectPath?: string) =>
+    apiCall<void>("/cli/claude-spawn", { streamId, model, messages, isolateLocalConfig, projectPath }),
   claudeKill: (streamId: string) =>
     apiCall<void>("/cli/claude-kill", { streamId }),
   codexDetect: () =>
     apiCall<{ installed: boolean; path?: string }>("/cli/codex-detect", {}),
-  codexSpawn: (streamId: string, model: string, prompt: string, isolateLocalConfig: boolean, timeoutMinutes?: number) =>
-    apiCall<void>("/cli/codex-spawn", { streamId, model, prompt, isolateLocalConfig, timeoutMinutes }),
+  codexSpawn: (streamId: string, model: string, prompt: string, isolateLocalConfig: boolean, timeoutMinutes?: number, projectPath?: string) =>
+    apiCall<void>("/cli/codex-spawn", { streamId, model, prompt, isolateLocalConfig, timeoutMinutes, projectPath }),
   codexKill: (streamId: string) =>
     apiCall<void>("/cli/codex-kill", { streamId }),
 }

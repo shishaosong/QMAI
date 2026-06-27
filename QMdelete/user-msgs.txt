@@ -6,7 +6,7 @@
 ----
 [282] 可以先测试一下，测试之后，我看是否进入阶段3/4
 ----
-[295] https://freeapi.dgbmc.top/  sk-2KahH6T5uzmyvTX4ChjFWMkHPEzJyxxOikAfmbQuTZPHJZFm     我给你发一个LLM模型  你用来测试
+[295] https://freeapi.dgbmc.top/  [REDACTED_API_KEY]     我给你发一个LLM模型  你用来测试
 ----
 [380] 基于现在的验证直接进入阶段 3/4.
 ----

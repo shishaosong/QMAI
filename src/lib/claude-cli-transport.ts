@@ -15,7 +15,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/platform"
 import { httpCli } from "@/lib/http-adapter"
 import { serverEvents } from "@/lib/server-events"
-import type { LlmConfig } from "@/stores/wiki-store"
+import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import type { ChatMessage, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
 
@@ -111,6 +111,11 @@ type SpawnPayload = Record<string, unknown> & {
   model: string
   messages: ChatMessage[]
   isolateLocalConfig: boolean
+  projectPath?: string
+}
+
+function currentProjectPath(): string | undefined {
+  return useWikiStore.getState().project?.path?.trim() || undefined
 }
 
 /**
@@ -253,6 +258,7 @@ export async function streamClaudeCodeCli(
         model: config.model,
         messages,
         isolateLocalConfig: config.localCliIsolation === true,
+        projectPath: currentProjectPath(),
       }
       await invoke("claude_cli_spawn", payload)
     } else {
@@ -304,7 +310,13 @@ export async function streamClaudeCodeCli(
         return
       }
 
-      await httpCli.claudeSpawn(streamId, config.model, messages, config.localCliIsolation === true)
+      await httpCli.claudeSpawn(
+        streamId,
+        config.model,
+        messages,
+        config.localCliIsolation === true,
+        currentProjectPath(),
+      )
     }
 
     if (aborted || signal?.aborted) {

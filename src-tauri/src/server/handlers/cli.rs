@@ -77,30 +77,36 @@ impl CodexEmitter for BroadcastCodexEmitter {
 // ── Request types ──────────────────────────────────────────────────
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaudeCliSpawnReq {
     stream_id: String,
     model: String,
     messages: Vec<claude_cli::ClaudeMessage>,
     #[serde(default)]
     isolate_local_config: bool,
+    project_path: Option<String>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ClaudeCliKillReq {
     stream_id: String,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexCliSpawnReq {
     stream_id: String,
     model: String,
     prompt: String,
     #[serde(default)]
     isolate_local_config: bool,
+    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CodexCliKillReq {
     stream_id: String,
 }
@@ -109,6 +115,13 @@ pub struct CodexCliKillReq {
 
 pub async fn claude_cli_detect() -> Json<serde_json::Value> {
     match claude_cli::do_claude_cli_detect().await {
+        Ok(result) => ok(result),
+        Err(e) => err(e),
+    }
+}
+
+pub async fn claude_cli_list_models() -> Json<serde_json::Value> {
+    match claude_cli::do_claude_cli_list_models(None).await {
         Ok(result) => ok(result),
         Err(e) => err(e),
     }
@@ -126,6 +139,7 @@ pub async fn claude_cli_spawn(
         req.model,
         req.messages,
         req.isolate_local_config,
+        req.project_path,
     )
     .await
     {
@@ -151,6 +165,13 @@ pub async fn codex_cli_detect() -> Json<serde_json::Value> {
     }
 }
 
+pub async fn codex_cli_list_models() -> Json<serde_json::Value> {
+    match codex_cli::codex_cli_list_models(None).await {
+        Ok(result) => ok(result),
+        Err(e) => err(e),
+    }
+}
+
 pub async fn codex_cli_spawn(
     State(state): State<SharedState>,
     Json(req): Json<CodexCliSpawnReq>,
@@ -163,6 +184,7 @@ pub async fn codex_cli_spawn(
         req.model,
         req.prompt,
         req.isolate_local_config,
+        req.project_path,
         req.timeout_minutes,
     )
     .await

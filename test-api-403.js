@@ -1,6 +1,10 @@
-// 测试不同 headers 组合找出 403 的原因
-const API_KEY = "ah-52ff02ce8f7c1e6028e3bec33ba488a92cdaec659756c8cee92c2b4ef5ee83fe";
+// 测试不同 headers 组合找出 403 的原�?
+const API_KEY = process.env.LINUX_DO_API_KEY || "";
 const BASE_URL = "https://hub.linux.do/v1";
+
+if (!API_KEY) {
+  throw new Error("Set LINUX_DO_API_KEY before running this script.");
+}
 
 async function testWithHeaders(testName, headers) {
   console.log(`\n=== ${testName} ===`);
@@ -18,12 +22,12 @@ async function testWithHeaders(testName, headers) {
       const text = await response.text();
       console.log(`403 响应: ${text.substring(0, 200)}`);
     } else if (response.ok) {
-      console.log("✅ 成功");
+      console.log("�?成功");
     }
 
     return response.status;
   } catch (error) {
-    console.error(`❌ 错误: ${error.message}`);
+    console.error(`�?错误: ${error.message}`);
     return -1;
   }
 }
@@ -41,7 +45,7 @@ async function runTests() {
   });
 
   // 测试 3: Authorization + Origin: 空字符串 (模拟软件中的行为)
-  await testWithHeaders("测试3: Authorization + Origin: 空", {
+  await testWithHeaders("测试3: Authorization + Origin: �?, {
     "Authorization": `Bearer ${API_KEY}`,
     "Origin": ""
   });
@@ -52,22 +56,22 @@ async function runTests() {
     "Origin": "http://localhost"
   });
 
-  // 测试 5: Authorization + Content-Type + Origin: 空
-  await testWithHeaders("测试5: Authorization + Content-Type + Origin: 空", {
+  // 测试 5: Authorization + Content-Type + Origin: �?
+  await testWithHeaders("测试5: Authorization + Content-Type + Origin: �?, {
     "Authorization": `Bearer ${API_KEY}`,
     "Content-Type": "application/json",
     "Origin": ""
   });
 
-  // 测试 6: 模拟软件 withCustomOriginHeader 的输出
-  await testWithHeaders("测试6: 模拟软件的 headers (非本地端点)", {
+  // 测试 6: 模拟软件 withCustomOriginHeader 的输�?
+  await testWithHeaders("测试6: 模拟软件�?headers (非本地端�?", {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${API_KEY}`,
     "Origin": ""  // 这是软件中对非本地端点设置的
   });
 
-  // 测试 7: 不设置 Origin
-  await testWithHeaders("测试7: 不设置 Origin", {
+  // 测试 7: 不设�?Origin
+  await testWithHeaders("测试7: 不设�?Origin", {
     "Content-Type": "application/json",
     "Authorization": `Bearer ${API_KEY}`
   });

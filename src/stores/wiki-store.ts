@@ -381,6 +381,8 @@ export interface SavedModel {
  * briefly switch to a different provider.
  */
 export interface ProviderOverride {
+  name?: string
+  createdAt?: number
   label?: string             // 自定义配置的显示名称
   apiKey?: string
   model?: string

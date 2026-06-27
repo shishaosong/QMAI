@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core"
 import type { LlmConfig } from "@/stores/wiki-store"
 import { isTauri } from "@/lib/platform"
+import { normalizePath } from "@/lib/path-utils"
+import { useWikiStore } from "@/stores/wiki-store"
 
 export interface LocalCliDetectResult {
   installed: boolean
@@ -8,6 +10,15 @@ export interface LocalCliDetectResult {
   path: string | null
   model?: string | null
   error: string | null
+}
+
+export interface LocalCliModelListResult {
+  models: string[]
+}
+
+function currentProjectPath(): string | undefined {
+  const path = useWikiStore.getState().project?.path?.trim()
+  return path ? normalizePath(path) : undefined
 }
 
 function detectCommand(provider: LlmConfig["provider"]): "claude_cli_detect" | "codex_cli_detect" | null {
@@ -23,6 +34,14 @@ export async function detectLocalCliConfig(provider: LlmConfig["provider"]): Pro
     return { installed: false, version: null, path: null, error: "仅桌面端支持本地 CLI 检测" }
   }
   return invoke<LocalCliDetectResult>(command)
+}
+
+export async function listCodexCliModels(): Promise<LocalCliModelListResult> {
+  return invoke<LocalCliModelListResult>("codex_cli_list_models", { projectPath: currentProjectPath() })
+}
+
+export async function listClaudeCliModels(): Promise<LocalCliModelListResult> {
+  return invoke<LocalCliModelListResult>("claude_cli_list_models", { projectPath: currentProjectPath() })
 }
 
 export async function resolveRuntimeLocalCliConfig(config: LlmConfig): Promise<LlmConfig> {

@@ -19,6 +19,19 @@ pub struct LocalCliEnvironmentInfo {
     pub no_proxy: Option<String>,
 }
 
+const PROJECT_LOCAL_CLI_ENV_FILE: &str = ".qmai/local-cli-env.json";
+const PROJECT_LOCAL_CLI_ENV_KEYS: &[&str] = &[
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "OPENAI_BASE_URL",
+    "OPENAI_API_BASE",
+    "ANTHROPIC_BASE_URL",
+    "HTTP_PROXY",
+    "HTTPS_PROXY",
+    "ALL_PROXY",
+    "NO_PROXY",
+];
+
 pub fn apply_local_cli_environment(cmd: &mut tokio::process::Command) -> LocalCliEnvironmentInfo {
     let info = current_local_cli_environment();
 
@@ -43,6 +56,23 @@ pub fn apply_local_cli_environment(cmd: &mut tokio::process::Command) -> LocalCl
     info
 }
 
+pub fn apply_project_local_cli_environment(
+    cmd: &mut tokio::process::Command,
+    project_dir: Option<&Path>,
+) -> Option<PathBuf> {
+    let project_dir = project_dir?;
+    let path = project_dir.join(PROJECT_LOCAL_CLI_ENV_FILE);
+    let env = read_project_local_cli_environment(&path);
+    if env.is_empty() {
+        return None;
+    }
+
+    for (key, value) in env {
+        cmd.env(key, value);
+    }
+    Some(path)
+}
+
 fn apply_optional_env(cmd: &mut tokio::process::Command, key: &str, value: &Option<String>) {
     match value {
         Some(v) if !v.is_empty() => {
@@ -54,6 +84,29 @@ fn apply_optional_env(cmd: &mut tokio::process::Command, key: &str, value: &Opti
             cmd.env_remove(key.to_ascii_lowercase());
         }
     }
+}
+
+fn read_project_local_cli_environment(path: &Path) -> Vec<(String, String)> {
+    let Ok(content) = std::fs::read_to_string(path) else {
+        return Vec::new();
+    };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
+        return Vec::new();
+    };
+    let Some(obj) = json.as_object() else {
+        return Vec::new();
+    };
+
+    PROJECT_LOCAL_CLI_ENV_KEYS
+        .iter()
+        .filter_map(|key| {
+            obj.get(*key)
+                .and_then(serde_json::Value::as_str)
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| ((*key).to_string(), value.to_string()))
+        })
+        .collect()
 }
 
 pub fn current_local_cli_environment() -> LocalCliEnvironmentInfo {
@@ -88,6 +141,28 @@ pub fn resolve_home_dir() -> Option<PathBuf> {
                 .filter(|value| !value.is_empty())
                 .map(PathBuf::from)
         })
+}
+
+pub fn resolve_cli_project_dir(project_path: Option<&str>) -> Result<Option<PathBuf>, String> {
+    let Some(raw_path) = project_path
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+
+    let path = PathBuf::from(raw_path);
+    if !path.exists() {
+        return Err(format!("Project path does not exist: '{}'", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "Project path is not a directory: '{}'",
+            path.display()
+        ));
+    }
+
+    Ok(Some(path.canonicalize().unwrap_or(path)))
 }
 
 pub fn read_claude_local_config(home_dir: Option<&Path>) -> LocalCliConfigInfo {
@@ -181,6 +256,28 @@ mod tests {
         assert_eq!(info.https_proxy.as_deref(), Some("http://proxy:7890"));
         assert_eq!(info.all_proxy.as_deref(), Some("http://proxy:7890"));
         assert_eq!(info.no_proxy.as_deref(), Some("localhost,127.0.0.1"));
+    }
+
+    #[test]
+    fn reads_project_local_cli_environment_allowlist() {
+        let dir = tempdir_for_test();
+        let qmai_dir = dir.join(".qmai");
+        std::fs::create_dir_all(&qmai_dir).unwrap();
+        let path = qmai_dir.join("local-cli-env.json");
+        std::fs::write(
+            &path,
+            r#"{
+              "OPENAI_API_KEY": "sk-project",
+              "ANTHROPIC_API_KEY": "anthropic-project",
+              "UNSAFE_EXTRA": "ignored"
+            }"#,
+        )
+        .unwrap();
+
+        let env = read_project_local_cli_environment(&path);
+        assert!(env.contains(&("OPENAI_API_KEY".to_string(), "sk-project".to_string())));
+        assert!(env.contains(&("ANTHROPIC_API_KEY".to_string(), "anthropic-project".to_string())));
+        assert!(!env.iter().any(|(key, _)| key == "UNSAFE_EXTRA"));
     }
 
     fn tempdir_for_test() -> PathBuf {

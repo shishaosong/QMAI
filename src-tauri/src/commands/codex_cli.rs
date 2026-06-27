@@ -20,7 +20,8 @@ use tokio::sync::Mutex;
 
 use super::cli_resolver::{child_path_env, find_cli_command};
 use super::local_cli_config::{
-    apply_local_cli_environment, read_codex_local_config, resolve_home_dir, LocalCliConfigInfo,
+    apply_local_cli_environment, apply_project_local_cli_environment, read_codex_local_config,
+    resolve_cli_project_dir, resolve_home_dir, LocalCliConfigInfo,
 };
 
 // ── Event emitter abstraction ─────────────────────────────────────
@@ -76,6 +77,11 @@ pub struct DetectResult {
     path: Option<String>,
     model: Option<String>,
     error: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct ModelListResult {
+    models: Vec<String>,
 }
 
 const DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES: u64 = 10;
@@ -200,6 +206,44 @@ pub async fn codex_cli_detect() -> Result<DetectResult, String> {
     do_codex_cli_detect().await
 }
 
+#[tauri::command]
+pub async fn codex_cli_list_models(project_path: Option<String>) -> Result<ModelListResult, String> {
+    let codex = find_codex_command().await?;
+    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
+    let mut cmd = Command::new(&codex);
+    suppress_windows_console(&mut cmd);
+    apply_local_cli_environment(&mut cmd);
+    apply_project_local_cli_environment(&mut cmd, project_dir.as_deref());
+    if let Some(path_env) = child_path_env().await {
+        cmd.env("PATH", path_env);
+    }
+    if let Some(dir) = &project_dir {
+        cmd.current_dir(dir);
+    }
+
+    let output = tokio::time::timeout(
+        Duration::from_secs(20),
+        cmd.args(["debug", "models"]).output(),
+    )
+    .await
+    .map_err(|_| "`codex debug models` timed out after 20 seconds".to_string())?
+    .map_err(|error| format!("Failed to run `codex debug models`: {error}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(if stderr.is_empty() {
+            format!("`codex debug models` exited with {}", output.status)
+        } else {
+            stderr
+        });
+    }
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    Ok(ModelListResult {
+        models: parse_codex_debug_models(&stdout)?,
+    })
+}
+
 /// Spawn `codex exec --json` and pipe stdout back via the given emitter.
 /// Closes stdin after writing the prompt so codex starts processing.
 /// Emits a final done event with `{ code, stderr, stdout }` when the
@@ -213,6 +257,7 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     model: String,
     prompt: String,
     isolate_local_config: bool,
+    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 ) -> Result<(), String> {
     if prompt.trim().is_empty() {
@@ -220,6 +265,7 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     }
 
     let codex = find_codex_command().await?;
+    let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
     let mut cmd = Command::new(&codex);
     suppress_windows_console(&mut cmd);
     apply_local_cli_environment(&mut cmd);
@@ -228,6 +274,10 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
     }
     if isolate_local_config {
         isolate_llm_api_key_env(&mut cmd);
+    }
+    apply_project_local_cli_environment(&mut cmd, project_dir.as_deref());
+    if let Some(dir) = &project_dir {
+        cmd.current_dir(dir);
     }
     cmd.args(build_codex_cli_args(&model, isolate_local_config));
 
@@ -354,16 +404,59 @@ pub async fn codex_cli_spawn(
     model: String,
     prompt: String,
     isolate_local_config: bool,
+    project_path: Option<String>,
     timeout_minutes: Option<u64>,
 ) -> Result<(), String> {
     let emitter = TauriCodexEmitter::new(app);
-    do_codex_cli_spawn(&state, emitter, stream_id, model, prompt, isolate_local_config, timeout_minutes).await
+    do_codex_cli_spawn(
+        &state,
+        emitter,
+        stream_id,
+        model,
+        prompt,
+        isolate_local_config,
+        project_path,
+        timeout_minutes,
+    )
+    .await
 }
 
 fn codex_spawn_timeout_minutes(value: Option<u64>) -> u64 {
     value
         .unwrap_or(DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES)
         .clamp(MIN_CODEX_SPAWN_TIMEOUT_MINUTES, MAX_CODEX_SPAWN_TIMEOUT_MINUTES)
+}
+
+fn parse_codex_debug_models(stdout: &str) -> Result<Vec<String>, String> {
+    let value: serde_json::Value = serde_json::from_str(stdout)
+        .map_err(|error| format!("Failed to parse `codex debug models` JSON: {error}"))?;
+    let Some(models) = value.get("models").and_then(serde_json::Value::as_array) else {
+        return Ok(Vec::new());
+    };
+
+    let mut parsed = Vec::new();
+    for model in models {
+        if model
+            .get("visibility")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|visibility| visibility != "list")
+        {
+            continue;
+        }
+        let slug = model
+            .get("slug")
+            .or_else(|| model.get("id"))
+            .or_else(|| model.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|value| !value.is_empty());
+        if let Some(slug) = slug {
+            parsed.push(slug.to_string());
+        }
+    }
+    parsed.sort();
+    parsed.dedup();
+    Ok(parsed)
 }
 
 fn build_codex_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
@@ -501,5 +594,19 @@ mod tests {
         let args = build_codex_cli_args("", false);
         assert!(!args.contains(&"--model".to_string()));
         assert_eq!(args.last().map(String::as_str), Some("-"));
+    }
+
+    #[test]
+    fn codex_model_list_skips_hidden_models() {
+        let stdout = r#"{
+            "models": [
+                { "slug": "gpt-5.5", "visibility": "list" },
+                { "slug": "codex-auto-review", "visibility": "hidden" },
+                { "slug": "gpt-5.4-mini" }
+            ]
+        }"#;
+
+        let models = parse_codex_debug_models(stdout).unwrap();
+        assert_eq!(models, vec!["gpt-5.4-mini".to_string(), "gpt-5.5".to_string()]);
     }
 }

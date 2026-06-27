@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState, useRef } from "react"
-import { ChevronDown, ChevronRight, AlertCircle, CheckCircle2, Loader2, XCircle } from "lucide-react"
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, FolderOpen, Loader2, RotateCcw, Save, XCircle } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { invoke } from "@tauri-apps/api/core"
+import { openFileLocation } from "@/commands/fs"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type ReasoningConfig, type ReasoningMode, type SavedModel } from "@/stores/wiki-store"
 import { LLM_PRESETS, type LlmPreset } from "../llm-presets"
@@ -17,6 +19,13 @@ import { useBatchModelTest } from "../hooks/use-batch-model-test"
 import { ModelSelectInput } from "../model-select-input"
 import { SavedModelsManager } from "./saved-models-manager"
 import { CustomProviderCards } from "./custom-provider-cards"
+import {
+  EMPTY_LOCAL_CLI_PROJECT_ENV,
+  loadLocalCliProjectEnv,
+  localCliProjectEnvFilePath,
+  saveLocalCliProjectEnv,
+  type LocalCliProjectEnv,
+} from "@/lib/local-cli-project-env"
 
 export function LlmProviderSection() {
   const { t } = useTranslation()
@@ -151,6 +160,7 @@ function PresetRow({
   onChange,
 }: PresetRowProps) {
   const { t } = useTranslation()
+  const projectPath = useWikiStore((s) => s.project?.path ?? "")
   const ov = override ?? {}
   const model = ov.model?.trim() || preset.defaultModel || ""
   const apiKey = ov.apiKey ?? ""
@@ -218,7 +228,9 @@ function PresetRow({
       setModelListState({
         loading: false,
         success: true,
-        message: t("settings.sections.shared.modelListSuccess", { count: result.models.length }),
+        message: isLocalCliProvider
+          ? `已读取 ${result.models.length} 个 CLI 候选模型；候选列表不是密钥权限校验，请用“测试模型”确认实际可用。`
+          : t("settings.sections.shared.modelListSuccess", { count: result.models.length }),
       })
     } catch (error) {
       setModelListState({
@@ -458,6 +470,13 @@ function PresetRow({
             </div>
           )}
 
+          {isLocalCliProvider && (
+            <LocalCliProjectEnvEditor
+              projectPath={projectPath}
+              provider={preset.provider}
+            />
+          )}
+
           {preset.provider === "codex-cli" && (
             <div className="space-y-2 rounded-md border p-3">
               <Label>{t("settings.sections.llm.codexCliTimeout")}</Label>
@@ -576,6 +595,9 @@ function PresetRow({
                 className="flex min-h-[40px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 resize-none"
                 rows={1}
               />
+              <p className="text-xs text-muted-foreground">
+                有已选模型时优先使用第一个已选模型；没有已选模型时使用上面的模型字段。
+              </p>
             </div>
           )}
 
@@ -698,6 +720,230 @@ function PresetRow({
             )}
           </div>
         </div>
+      )}
+    </div>
+  )
+}
+
+type LocalCliProjectEnvStatus = "idle" | "loading" | "saving" | "saved" | "error"
+
+const localCliProjectEnvFields: Record<
+  "codex-cli" | "claude-code",
+  Array<{
+    key: keyof LocalCliProjectEnv
+    label: string
+    placeholder: string
+    secret?: boolean
+  }>
+> = {
+  "codex-cli": [
+    { key: "OPENAI_API_KEY", label: "OPENAI_API_KEY", placeholder: "sk-...", secret: true },
+    { key: "OPENAI_BASE_URL", label: "OPENAI_BASE_URL", placeholder: "https://api.openai.com/v1" },
+    { key: "OPENAI_API_BASE", label: "OPENAI_API_BASE", placeholder: "https://api.openai.com/v1" },
+  ],
+  "claude-code": [
+    { key: "ANTHROPIC_API_KEY", label: "ANTHROPIC_API_KEY", placeholder: "sk-ant-...", secret: true },
+    { key: "ANTHROPIC_BASE_URL", label: "ANTHROPIC_BASE_URL", placeholder: "https://api.anthropic.com" },
+  ],
+}
+
+function cloneLocalCliProjectEnv(env: LocalCliProjectEnv): LocalCliProjectEnv {
+  return { ...env }
+}
+
+function sameLocalCliProjectEnv(a: LocalCliProjectEnv, b: LocalCliProjectEnv): boolean {
+  return (
+    a.OPENAI_API_KEY === b.OPENAI_API_KEY &&
+    a.ANTHROPIC_API_KEY === b.ANTHROPIC_API_KEY &&
+    a.OPENAI_BASE_URL === b.OPENAI_BASE_URL &&
+    a.OPENAI_API_BASE === b.OPENAI_API_BASE &&
+    a.ANTHROPIC_BASE_URL === b.ANTHROPIC_BASE_URL &&
+    a.HTTP_PROXY === b.HTTP_PROXY &&
+    a.HTTPS_PROXY === b.HTTPS_PROXY &&
+    a.ALL_PROXY === b.ALL_PROXY &&
+    a.NO_PROXY === b.NO_PROXY
+  )
+}
+
+function LocalCliProjectEnvEditor({
+  projectPath,
+  provider,
+}: {
+  projectPath: string
+  provider: LlmPreset["provider"]
+}) {
+  const fields =
+    provider === "codex-cli" || provider === "claude-code"
+      ? localCliProjectEnvFields[provider]
+      : []
+  const [env, setEnv] = useState<LocalCliProjectEnv>({ ...EMPTY_LOCAL_CLI_PROJECT_ENV })
+  const [savedEnv, setSavedEnv] = useState<LocalCliProjectEnv>({ ...EMPTY_LOCAL_CLI_PROJECT_ENV })
+  const [status, setStatus] = useState<LocalCliProjectEnvStatus>("idle")
+  const [message, setMessage] = useState("")
+  const filePath = projectPath ? localCliProjectEnvFilePath(projectPath) : ""
+  const dirty = !sameLocalCliProjectEnv(env, savedEnv)
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      if (!projectPath) {
+        const empty = { ...EMPTY_LOCAL_CLI_PROJECT_ENV }
+        setEnv(empty)
+        setSavedEnv(empty)
+        setStatus("idle")
+        setMessage("")
+        return
+      }
+
+      setStatus("loading")
+      setMessage("")
+      try {
+        const loaded = await loadLocalCliProjectEnv(projectPath)
+        if (cancelled) return
+        setEnv(cloneLocalCliProjectEnv(loaded))
+        setSavedEnv(cloneLocalCliProjectEnv(loaded))
+        setStatus("idle")
+      } catch (error) {
+        if (cancelled) return
+        setStatus("error")
+        setMessage(error instanceof Error ? error.message : String(error))
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [projectPath])
+
+  function updateField(key: keyof LocalCliProjectEnv, value: string) {
+    setEnv((current) => ({ ...current, [key]: value }))
+    if (status === "saved") {
+      setStatus("idle")
+      setMessage("")
+    }
+  }
+
+  async function reload() {
+    if (!projectPath) return
+    setStatus("loading")
+    setMessage("")
+    try {
+      const loaded = await loadLocalCliProjectEnv(projectPath)
+      setEnv(cloneLocalCliProjectEnv(loaded))
+      setSavedEnv(cloneLocalCliProjectEnv(loaded))
+      setStatus("idle")
+    } catch (error) {
+      setStatus("error")
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  async function save() {
+    if (!projectPath) return
+    setStatus("saving")
+    setMessage("")
+    try {
+      await saveLocalCliProjectEnv(projectPath, env)
+      const nextSaved = cloneLocalCliProjectEnv(env)
+      setSavedEnv(nextSaved)
+      setStatus("saved")
+      setMessage("已保存。下次拉取模型、测试连接或生成时会使用这些项目变量。")
+    } catch (error) {
+      setStatus("error")
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  async function openLocation() {
+    if (!filePath) return
+    try {
+      await openFileLocation(filePath)
+    } catch (error) {
+      setStatus("error")
+      setMessage(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  return (
+    <div className="space-y-3 rounded-md border p-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="text-sm font-medium">项目 CLI 环境</div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            保存到当前项目；这里的非空值会覆盖 CLI 子进程继承到的同名环境变量。
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={() => void reload()}
+            disabled={!projectPath || status === "loading" || status === "saving"}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RotateCcw className={`h-3.5 w-3.5 ${status === "loading" ? "animate-spin" : ""}`} />
+            重新读取
+          </button>
+          <button
+            type="button"
+            onClick={() => void openLocation()}
+            disabled={!filePath || status === "saving"}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <FolderOpen className="h-3.5 w-3.5" />
+            打开位置
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!projectPath || status === "saving" || !dirty}
+            className="inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-xs hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {status === "saving" ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
+            保存
+          </button>
+        </div>
+      </div>
+
+      {!projectPath ? (
+        <div className="rounded-md bg-muted/50 px-2 py-1.5 text-xs text-muted-foreground">
+          先打开一个项目后再配置项目级 CLI 环境。
+        </div>
+      ) : (
+        <>
+          <div className="rounded-md bg-muted/50 px-2 py-1.5 font-mono text-[11px] text-muted-foreground break-all">
+            {filePath}
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            {fields.map((field) => {
+              const InputComponent = field.secret ? SecretInput : Input
+              return (
+                <div key={field.key} className="space-y-1.5">
+                  <Label className="text-xs">{field.label}</Label>
+                  <InputComponent
+                    value={env[field.key]}
+                    onChange={(event) => updateField(field.key, event.target.value)}
+                    placeholder={field.placeholder}
+                    autoComplete="off"
+                  />
+                </div>
+              )
+            })}
+          </div>
+          <p className="text-xs text-muted-foreground">
+            空值不会写入 CLI 进程环境；也就是说你可以只覆盖其中一项。
+          </p>
+          {message ? (
+            <p className={`text-xs ${status === "error" ? "text-destructive" : "text-emerald-600"}`}>
+              {message}
+            </p>
+          ) : null}
+        </>
       )}
     </div>
   )

@@ -11,7 +11,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event"
 import { isTauri } from "@/lib/platform"
 import { httpCli } from "@/lib/http-adapter"
 import { serverEvents } from "@/lib/server-events"
-import type { LlmConfig } from "@/stores/wiki-store"
+import { useWikiStore, type LlmConfig } from "@/stores/wiki-store"
 import type { ChatMessage, ContentBlock, RequestOverrides } from "./llm-providers"
 import type { StreamCallbacks } from "./llm-client"
 
@@ -28,11 +28,64 @@ export function parseCodexCliLine(rawLine: string): string | null {
 
   if (!evt || typeof evt !== "object") return null
   const obj = evt as Record<string, unknown>
-  if (obj.type !== "item.completed") return null
 
-  const item = obj.item as Record<string, unknown> | undefined
-  if (item?.type !== "agent_message") return null
-  return typeof item.text === "string" && item.text.length > 0 ? item.text : null
+  if (obj.type === "item.completed") {
+    const item = obj.item as Record<string, unknown> | undefined
+    if (!item) return null
+    if (item.type === "agent_message") {
+      return typeof item.text === "string" && item.text.length > 0 ? item.text : null
+    }
+    if (item.type === "message") {
+      return extractAssistantMessageText(item)
+    }
+    return null
+  }
+
+  if (obj.type === "turn.completed") {
+    const response = obj.response as Record<string, unknown> | undefined
+    const output = response?.output
+    if (!Array.isArray(output)) return null
+    for (let idx = output.length - 1; idx >= 0; idx -= 1) {
+      const item = output[idx]
+      if (item && typeof item === "object") {
+        const text = extractAssistantMessageText(item as Record<string, unknown>)
+        if (text) return text
+      }
+    }
+  }
+
+  return null
+}
+
+function extractAssistantMessageText(message: Record<string, unknown>): string | null {
+  if (message.role !== "assistant") return null
+  if (typeof message.text === "string" && message.text.length > 0) return message.text
+
+  const content = message.content
+  if (typeof content === "string") return content.length > 0 ? content : null
+  if (!Array.isArray(content)) return null
+
+  const parts = content.flatMap((block) => {
+    if (typeof block === "string") return block
+    if (!block || typeof block !== "object") return []
+    const record = block as Record<string, unknown>
+    if ((record.type === "output_text" || record.type === "text") && typeof record.text === "string") {
+      return record.text
+    }
+    return []
+  })
+
+  const text = parts.join("")
+  return text.length > 0 ? text : null
+}
+
+export function parseLastCodexCliAssistantText(rawOutput: string): string {
+  let last = ""
+  for (const line of rawOutput.split(/\r?\n/)) {
+    const parsed = parseCodexCliLine(line)
+    if (parsed !== null) last = parsed
+  }
+  return last
 }
 
 export function extractCodexCliError(rawOutput: string): string {
@@ -92,7 +145,12 @@ type SpawnPayload = Record<string, unknown> & {
   model: string
   prompt: string
   isolateLocalConfig: boolean
+  projectPath?: string
   timeoutMinutes?: number
+}
+
+function currentProjectPath(): string | undefined {
+  return useWikiStore.getState().project?.path?.trim() || undefined
 }
 
 export async function streamCodexCli(
@@ -233,6 +291,7 @@ export async function streamCodexCli(
         model: config.model,
         prompt: buildPrompt(messages),
         isolateLocalConfig: config.localCliIsolation === true,
+        projectPath: currentProjectPath(),
         timeoutMinutes: config.codexCliTimeoutMinutes,
       }
       await invoke("codex_cli_spawn", payload)
@@ -292,7 +351,14 @@ export async function streamCodexCli(
         return
       }
 
-      await httpCli.codexSpawn(streamId, config.model, buildPrompt(messages), config.localCliIsolation === true, config.codexCliTimeoutMinutes)
+      await httpCli.codexSpawn(
+        streamId,
+        config.model,
+        buildPrompt(messages),
+        config.localCliIsolation === true,
+        config.codexCliTimeoutMinutes,
+        currentProjectPath(),
+      )
     }
 
     if (aborted || signal?.aborted) {

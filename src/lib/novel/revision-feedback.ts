@@ -101,22 +101,23 @@ export function mergeRevisionFeedback(
   })
 }
 
-export function buildRevisionDirectives(feedback: NovelRevisionFeedback): string {
+export function buildRevisionDirectives(feedback: Partial<NovelRevisionFeedback> | null | undefined): string {
+  const normalized = normalizeRevisionFeedback(feedback)
   const sections: string[] = []
 
-  if (feedback.mustFix.length > 0) {
+  if (normalized.mustFix.length > 0) {
     sections.push(i18n.t("novel.revisionFeedback.mustFix"))
-    feedback.mustFix.forEach((item) => sections.push(`  - ${item}`))
+    normalized.mustFix.forEach((item) => sections.push(`  - ${item}`))
   }
 
-  if (feedback.shouldImprove.length > 0) {
+  if (normalized.shouldImprove.length > 0) {
     sections.push(i18n.t("novel.revisionFeedback.shouldImprove"))
-    feedback.shouldImprove.forEach((item) => sections.push(`  - ${item}`))
+    normalized.shouldImprove.forEach((item) => sections.push(`  - ${item}`))
   }
 
-  if (feedback.carryToNextChapter.length > 0) {
+  if (normalized.carryToNextChapter.length > 0) {
     sections.push(i18n.t("novel.revisionFeedback.carryToNextChapter"))
-    feedback.carryToNextChapter.forEach((item) => sections.push(`  - ${item}`))
+    normalized.carryToNextChapter.forEach((item) => sections.push(`  - ${item}`))
   }
 
   return sections.join("\n")
@@ -265,6 +266,22 @@ function dedupeRevisionFeedback(feedback: NovelRevisionFeedback): NovelRevisionF
 
 function uniqueNonEmpty(items: string[]): string[] {
   return Array.from(new Set(items.map((item) => item.trim()).filter(Boolean)))
+}
+
+function normalizeRevisionFeedback(feedback: Partial<NovelRevisionFeedback> | null | undefined): NovelRevisionFeedback {
+  if (!feedback || typeof feedback !== "object" || Array.isArray(feedback)) {
+    return createEmptyRevisionFeedback()
+  }
+  return dedupeRevisionFeedback({
+    mustFix: normalizeRevisionList(feedback.mustFix),
+    shouldImprove: normalizeRevisionList(feedback.shouldImprove),
+    carryToNextChapter: normalizeRevisionList(feedback.carryToNextChapter),
+  })
+}
+
+function normalizeRevisionList(value: unknown): string[] {
+  if (!Array.isArray(value)) return []
+  return value.filter((item): item is string => typeof item === "string")
 }
 
 function normalizeRevisionEntry(message: string, suggestion: string): string {

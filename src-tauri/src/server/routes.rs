@@ -61,11 +61,13 @@ pub fn create_router(state: SharedState) -> Router {
         .route("/extract/office-images", post(handlers::extract::extract_office_images))
         .route("/extract/save-pdf-images", post(handlers::extract::extract_and_save_pdf_images))
         .route("/extract/save-office-images", post(handlers::extract::extract_and_save_office_images))
-        // cli — 6 routes
+        // cli — 8 routes
         .route("/cli/claude-detect", get(handlers::cli::claude_cli_detect))
+        .route("/cli/claude-models", get(handlers::cli::claude_cli_list_models))
         .route("/cli/claude-spawn", post(handlers::cli::claude_cli_spawn))
         .route("/cli/claude-kill", post(handlers::cli::claude_cli_kill))
         .route("/cli/codex-detect", get(handlers::cli::codex_cli_detect))
+        .route("/cli/codex-models", get(handlers::cli::codex_cli_list_models))
         .route("/cli/codex-spawn", post(handlers::cli::codex_cli_spawn))
         .route("/cli/codex-kill", post(handlers::cli::codex_cli_kill))
         // sync — 6 routes

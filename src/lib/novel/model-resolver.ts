@@ -4,11 +4,66 @@ import { resolveConfig } from "@/components/settings/preset-resolver"
 
 export type NovelTaskType = "writing" | "review" | "summary" | "extract" | "lint"
 
+function overrideIncludesModel(override: ProviderOverride | undefined, modelId: string): boolean {
+  if (!override || override.enabled === false) return false
+  return override.model === modelId || override.savedModels?.some((m) => m.model === modelId) === true
+}
+
+function providerIdFromModelRef(modelRef: string): string | null {
+  const slashIdx = modelRef.indexOf("/")
+  return slashIdx > 0 ? modelRef.slice(0, slashIdx) : null
+}
+
+function isStaleModelRef(
+  modelRef: string,
+  activePresetId: string | null,
+  providerConfigs: Record<string, ProviderOverride>,
+): boolean {
+  const providerId = providerIdFromModelRef(modelRef)
+  if (!providerId) return false
+  if (activePresetId && providerId !== activePresetId) return true
+  return providerConfigs[providerId]?.enabled === false
+}
+
+export function resolveKnownModelConfig(
+  targetModel: string,
+  baseConfig: LlmConfig,
+  providerConfigs: Record<string, ProviderOverride>,
+): LlmConfig | null {
+  const slashIdx = targetModel.indexOf("/")
+  if (slashIdx > 0) {
+    const providerId = targetModel.slice(0, slashIdx)
+    const modelId = targetModel.slice(slashIdx + 1)
+    const override = providerConfigs[providerId]
+    if (overrideIncludesModel(override, modelId)) {
+      const template = LLM_PRESETS.find((p) => p.id === providerId) ?? LLM_PRESETS.find((p) => p.id === "custom")
+      if (template) {
+        return { ...resolveConfig(template, override, baseConfig), model: modelId }
+      }
+    }
+    return null
+  }
+
+  for (const [providerId, override] of Object.entries(providerConfigs)) {
+    if (overrideIncludesModel(override, targetModel)) {
+      const template = LLM_PRESETS.find((p) => p.id === providerId) ?? LLM_PRESETS.find((p) => p.id === "custom")
+      if (template) {
+        return { ...resolveConfig(template, override, baseConfig), model: targetModel }
+      }
+    }
+  }
+
+  return null
+}
+
 export function resolveModelConfig(
   targetModel: string,
   baseConfig: LlmConfig,
   providerConfigs: Record<string, ProviderOverride>,
 ): LlmConfig {
+  const known = resolveKnownModelConfig(targetModel, baseConfig, providerConfigs)
+  if (known) return known
+
   // 优先按 "providerId/modelId" 格式精确匹配
   const slashIdx = targetModel.indexOf("/")
   if (slashIdx > 0) {
@@ -62,12 +117,19 @@ export function resolveNovelModel(
     lint: novelConfig.reviewModel,
   }
 
-  const { providerConfigs, defaultLlmModel, aiChatModel } = useWikiStore.getState()
+  const { providerConfigs, defaultLlmModel, aiChatModel, activePresetId } = useWikiStore.getState()
 
   const taskModel = modelMap[taskType]
   if (!taskModel) {
     // 没有指定任务模型时：优先使用 AI 会话当前模型，再回退到默认模型
     const targetModel = aiChatModel?.trim() || defaultLlmModel?.trim()
+    if (targetModel && isStaleModelRef(targetModel, activePresetId, providerConfigs)) {
+      const writingModel = taskType === "writing" ? novelConfig.writingModel?.trim() : ""
+      if (writingModel) {
+        return resolveModelConfig(writingModel, llmConfig, providerConfigs)
+      }
+      return llmConfig
+    }
     if (targetModel) {
       return resolveModelConfig(targetModel, llmConfig, providerConfigs)
     }

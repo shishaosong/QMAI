@@ -1,5 +1,5 @@
 import { getProviderConfig, withCustomOriginHeader } from "@/lib/llm-providers"
-import { detectLocalCliConfig } from "@/lib/local-cli-config"
+import { detectLocalCliConfig, listClaudeCliModels, listCodexCliModels } from "@/lib/local-cli-config"
 import { isDirectRerankEndpoint } from "@/lib/rerank-api"
 import { getHttpFetch } from "@/lib/tauri-fetch"
 import type { EmbeddingConfig, LlmConfig, RerankConfig } from "@/stores/wiki-store"
@@ -166,6 +166,29 @@ async function fetchModelList(url: string, headers: Record<string, string>, _cur
 }
 
 async function fetchLocalCliModel(config: LlmConfig): Promise<LlmModelListResult> {
+  if (config.provider === "codex-cli") {
+    try {
+      const listed = await listCodexCliModels()
+      const models = toModelListResult([config.model, ...(listed.models ?? [])])
+      if (models.models.length > 0) return models
+    } catch {
+      // Fall back to the current configured model below. Older Codex CLI
+      // builds may not have `debug models`.
+    }
+  }
+
+  if (config.provider === "claude-code") {
+    try {
+      const listed = await listClaudeCliModels()
+      const models = toModelListResult([config.model, ...(listed.models ?? [])])
+      if (models.models.length > 0) return models
+    } catch {
+      // Claude Code CLI does not expose a stable live catalog command.
+      // Fall back to the current configured model below if our helper is
+      // unavailable on older desktop builds.
+    }
+  }
+
   const explicitModel = config.model.trim()
   if (explicitModel) return { models: [explicitModel] }
 
