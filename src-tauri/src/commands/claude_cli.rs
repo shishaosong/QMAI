@@ -17,6 +17,7 @@
 //! capabilities JSON.
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
@@ -376,7 +377,16 @@ pub async fn do_claude_cli_spawn<E: CliEmitter>(
     if let Some(dir) = &project_dir {
         cmd.current_dir(dir);
     }
-    cmd.args(build_claude_cli_args(&model, isolate_local_config));
+    let empty_mcp_config = if isolate_local_config {
+        Some(ensure_empty_mcp_config_file()?)
+    } else {
+        None
+    };
+    cmd.args(build_claude_cli_args(
+        &model,
+        isolate_local_config,
+        empty_mcp_config.as_deref(),
+    ));
 
     cmd.stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -515,7 +525,31 @@ pub async fn claude_cli_spawn(
     .await
 }
 
-fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String> {
+fn ensure_empty_mcp_config_file() -> Result<PathBuf, String> {
+    let dir = std::env::temp_dir().join("qmai-claude-cli");
+    std::fs::create_dir_all(&dir).map_err(|error| {
+        format!(
+            "Failed to create Claude MCP config directory '{}': {error}",
+            dir.display()
+        )
+    })?;
+
+    let path = dir.join("empty-mcp-config.json");
+    let contents = "{\"mcpServers\":{}}\n";
+    std::fs::write(&path, contents).map_err(|error| {
+        format!(
+            "Failed to write empty Claude MCP config '{}': {error}",
+            path.display()
+        )
+    })?;
+    Ok(path)
+}
+
+fn build_claude_cli_args(
+    model: &str,
+    isolate_local_config: bool,
+    empty_mcp_config_path: Option<&Path>,
+) -> Vec<String> {
     let mut args = vec![
         "-p".to_string(),
         "--output-format".to_string(),
@@ -526,12 +560,16 @@ fn build_claude_cli_args(model: &str, isolate_local_config: bool) -> Vec<String>
     ];
 
     if isolate_local_config {
+        let mcp_config_path = empty_mcp_config_path
+            .expect("empty MCP config path is required when isolating Claude local config")
+            .to_string_lossy()
+            .to_string();
         args.extend([
             "--setting-sources".to_string(),
             "project".to_string(),
             "--strict-mcp-config".to_string(),
             "--mcp-config".to_string(),
-            "{\"mcpServers\":{}}".to_string(),
+            mcp_config_path,
             "--disable-slash-commands".to_string(),
             "--tools".to_string(),
             "".to_string(),
@@ -648,7 +686,7 @@ mod tests {
 
     #[test]
     fn claude_args_do_not_isolate_local_config_by_default() {
-        let args = build_claude_cli_args("sonnet", false);
+        let args = build_claude_cli_args("sonnet", false, None);
 
         assert!(args.contains(&"--model".to_string()));
         assert!(args.contains(&"sonnet".to_string()));
@@ -659,7 +697,9 @@ mod tests {
 
     #[test]
     fn claude_args_can_isolate_user_config_tools_and_mcp() {
-        let args = build_claude_cli_args("sonnet", true);
+        let mcp_config_path = std::env::temp_dir().join("qmai-test-empty-mcp-config.json");
+        let mcp_config_path_string = mcp_config_path.to_string_lossy().to_string();
+        let args = build_claude_cli_args("sonnet", true, Some(&mcp_config_path));
 
         assert!(args
             .windows(2)
@@ -667,7 +707,8 @@ mod tests {
         assert!(args.contains(&"--strict-mcp-config".to_string()));
         assert!(args
             .windows(2)
-            .any(|pair| pair[0] == "--mcp-config" && pair[1] == "{\"mcpServers\":{}}"));
+            .any(|pair| pair[0] == "--mcp-config" && pair[1] == mcp_config_path_string));
+        assert!(!args.iter().any(|arg| arg.starts_with("{\"mcpServers\"")));
         assert!(args.contains(&"--disable-slash-commands".to_string()));
         assert!(args
             .windows(2)
@@ -680,7 +721,7 @@ mod tests {
 
     #[test]
     fn claude_args_skip_model_flag_when_model_is_empty() {
-        let args = build_claude_cli_args("", false);
+        let args = build_claude_cli_args("", false, None);
         assert!(!args.contains(&"--model".to_string()));
     }
 
