@@ -57,6 +57,10 @@ export default defineConfig(async () => ({
               return "graphology-vendor"
             }
           }
+          // Split large book-analysis modules into their own chunk
+          if (id.includes("/src/lib/novel/book-analysis/")) {
+            return "book-analysis-vendor"
+          }
           return undefined
         },
       },

@@ -130,7 +130,7 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
         className="h-8 min-w-[160px] justify-between gap-2 px-3 text-xs"
       >
         <span className="max-w-[200px] truncate">
-          {selectedModel?.name ?? value ?? t("chat.selectModel")}
+          {selectedModel?.name ?? (value && value.trim() ? value : t("chat.selectModel"))}
         </span>
         <ChevronDown className="h-3.5 w-3.5 shrink-0 opacity-50" />
       </Button>

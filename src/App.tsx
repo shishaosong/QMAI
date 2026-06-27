@@ -4,13 +4,10 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
-import { serverEvents } from "@/lib/server-events"
-import { listDirectory, openProject, fileExists } from "@/commands/fs"
-import { getLastProject, getRecentProjects, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadClipServerConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, saveLlmConfig, saveProviderConfigs, saveActivePresetId } from "@/lib/project-store"
-import { loadNovelProjectMeta } from "@/lib/novel/project-meta"
+import { listDirectory, openProject } from "@/commands/fs"
+import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, saveLlmConfig, saveProviderConfigs, saveActivePresetId } from "@/lib/project-store"
 import { loadReviewItems, loadChatHistory } from "@/lib/persist"
 import { setupAutoSave } from "@/lib/auto-save"
-import { startClipWatcher } from "@/lib/clip-watcher"
 import { checkForAppUpdate } from "@/lib/app-updater"
 import { initAnalytics } from "@/lib/analytics"
 import { restoreQueue as restoreIngestQueue } from "@/lib/ingest-queue"
@@ -18,12 +15,13 @@ import { AppLayout } from "@/components/layout/app-layout"
 import { WelcomeScreen } from "@/components/project/welcome-screen"
 import { CreateProjectDialog } from "@/components/project/create-project-dialog"
 import { formatAppTitle } from "@/lib/app-title"
-import { resetProjectState, resetProjectStores } from "@/lib/reset-project-state"
+import { resetProjectState } from "@/lib/reset-project-state"
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
 import { loadEnvLlmDefault } from "@/lib/env-llm-defaults"
 import { toast } from "@/lib/toast"
 import type { WikiProject } from "@/types/wiki"
+import { applyTheme, watchSystemTheme } from "@/lib/theme-utils"
 
 function App() {
   const project = useWikiStore((s) => s.project)
@@ -49,10 +47,9 @@ function App() {
     }
   }, [communitySummaryError, setCommunitySummaryError])
 
-  // Set up auto-save and clip watcher once on mount
+  // Set up auto-save once on mount
   useEffect(() => {
     setupAutoSave()
-    startClipWatcher()
   }, [])
 
   
@@ -63,15 +60,9 @@ function App() {
       try {
         // 先加载和应用主题
         const savedTheme = await loadTheme()
-        if (savedTheme !== null) {
-          useWikiStore.getState().setTheme(savedTheme)
-          document.documentElement.classList.remove("dark", "deep-blue")
-          if (savedTheme === "dark") {
-            document.documentElement.classList.add("dark")
-          } else if (savedTheme === "deep-blue") {
-            document.documentElement.classList.add("deep-blue")
-          }
-        }
+        const themeToUse = savedTheme ?? "system"
+        useWikiStore.getState().setTheme(themeToUse)
+        applyTheme(themeToUse)
 
         const envLlmDefault = loadEnvLlmDefault()
         const savedConfig = await loadLlmConfig()
@@ -126,8 +117,6 @@ function App() {
         if (savedProxy) {
           useWikiStore.getState().setProxyConfig(savedProxy)
         }
-        const savedClipServer = await loadClipServerConfig()
-        useWikiStore.getState().setClipServerConfig(savedClipServer)
         const savedLang = await loadLanguage()
         if (savedLang) {
           await i18n.changeLanguage(savedLang)
@@ -135,6 +124,10 @@ function App() {
         const savedNovelMode = await loadNovelMode()
         if (savedNovelMode !== null) {
           useWikiStore.getState().setNovelMode(savedNovelMode)
+        }
+        const savedMaxHistoryMessages = await loadMaxHistoryMessages()
+        if (savedMaxHistoryMessages !== null) {
+          useChatStore.getState().setMaxHistoryMessages(savedMaxHistoryMessages)
         }
         const savedRevisionFeedbackWindowConfig = await loadRevisionFeedbackWindowConfig()
         useWikiStore.getState().setRevisionFeedbackWindowConfig(savedRevisionFeedbackWindowConfig)
@@ -153,14 +146,24 @@ function App() {
         setLoading(false)
         void checkForAppUpdate()
         void initAnalytics()
-        // 浏览器模式下连接 SSE 事件流
-        if (!isTauri()) {
-          serverEvents.connect()
-        }
       }
     }
     init()
   }, [])
+
+  // 监听系统主题变化，当设置为跟随系统时自动切换
+  const theme = useWikiStore((s) => s.theme)
+  useEffect(() => {
+    if (theme === "system") {
+      applyTheme("system")
+      const unwatch = watchSystemTheme(() => {
+        applyTheme("system")
+      })
+      return unwatch
+    } else {
+      applyTheme(theme)
+    }
+  }, [theme])
 
   useEffect(() => {
     const title = formatAppTitle(project?.name)
@@ -173,22 +176,12 @@ function App() {
   }, [project?.name])
 
   async function handleProjectOpened(proj: WikiProject) {
-    if (isTauri()) {
-      await resetProjectState()
-    } else {
-      resetProjectStores()
-    }
+    await resetProjectState()
 
     setProject(proj)
     useWikiStore.getState().clearTransientTaskState()
-    const projectNovelMeta = await loadNovelProjectMeta(proj.path)
-    const hasNovelStructure = await fileExists(`${proj.path}/wiki/chapters`)
-    const projectNovelMode = await loadNovelMode(proj.id, proj.path)
-    if (projectNovelMode !== null) {
-      useWikiStore.getState().setNovelMode(projectNovelMode)
-    } else if (projectNovelMeta?.novelMode || hasNovelStructure) {
-      useWikiStore.getState().setNovelMode(true)
-    }
+    // 默认开启小说模式
+    useWikiStore.getState().setNovelMode(true)
     const projectNovelConfig = await loadNovelConfig(proj.id, proj.path)
     if (projectNovelConfig) {
       useWikiStore.getState().setNovelConfig(projectNovelConfig)
@@ -257,26 +250,6 @@ function App() {
           stopProjectFileSync().catch(() => {})
         }
       }).catch((err) => console.error("配置项目文件同步失败:", err))
-
-      import("@/commands/clip-server").then(({ getClipServerUrl }) => {
-        const clipServerConfig = useWikiStore.getState().clipServerConfig
-        if (!clipServerConfig.enabled) return
-        const url = getClipServerUrl(clipServerConfig)
-        fetch(`${url}/project`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: proj.path }),
-        }).catch(() => {})
-
-        getRecentProjects().then((recents) => {
-          const projects = recents.map((p) => ({ name: p.name, path: p.path }))
-          fetch(`${url}/projects`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ projects }),
-          }).catch(() => {})
-        }).catch(() => {})
-      }).catch(() => {})
     }
 
     try {

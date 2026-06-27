@@ -509,8 +509,7 @@ function PresetRow({
           {needsApiKey && (
             <div className="space-y-2">
               <Label>{t("settings.sections.llm.apiKey")}</Label>
-              <Input
-                type="password"
+              <SecretInput
                 value={apiKey}
                 onChange={(e) => onChange({ apiKey: e.target.value })}
                 placeholder={

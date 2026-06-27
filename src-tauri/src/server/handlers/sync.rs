@@ -52,13 +52,26 @@ fn err(e: String) -> Json<serde_json::Value> {
 /// Create an EventEmitter that forwards file-sync events via the
 /// server's broadcast channel. The callback maps event names to the
 /// appropriate `ServerEvent` variant.
-fn make_event_emitter(event_tx: tokio::sync::broadcast::Sender<crate::server::state::ServerEvent>) -> file_sync::EventEmitter {
+fn make_event_emitter(
+    event_tx: tokio::sync::broadcast::Sender<crate::server::state::ServerEvent>,
+) -> file_sync::EventEmitter {
     Box::new(move |event: &str, payload: serde_json::Value| {
-        let project_id = payload.get("projectId").and_then(|v| v.as_str()).unwrap_or("").to_string();
-        let tasks = payload.get("tasks").cloned().unwrap_or(serde_json::Value::Null);
+        let project_id = payload
+            .get("projectId")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+        let tasks = payload
+            .get("tasks")
+            .cloned()
+            .unwrap_or(serde_json::Value::Null);
         let server_event = match event {
-            "file-sync://queue-updated" => crate::server::state::ServerEvent::FileSyncQueueUpdated { project_id, tasks },
-            "file-sync://changed" => crate::server::state::ServerEvent::FileSyncChanged { project_id, tasks },
+            "file-sync://queue-updated" => {
+                crate::server::state::ServerEvent::FileSyncQueueUpdated { project_id, tasks }
+            }
+            "file-sync://changed" => {
+                crate::server::state::ServerEvent::FileSyncChanged { project_id, tasks }
+            }
             _ => return,
         };
         let _ = event_tx.send(server_event);
@@ -124,13 +137,9 @@ pub async fn rescan_project_files(
     }
 }
 
-pub async fn get_file_change_queue(
-    Json(req): Json<ProjectPathReq>,
-) -> Json<serde_json::Value> {
-    match tokio::task::spawn_blocking(move || {
-        file_sync::do_get_file_change_queue(req.project_path)
-    })
-    .await
+pub async fn get_file_change_queue(Json(req): Json<ProjectPathReq>) -> Json<serde_json::Value> {
+    match tokio::task::spawn_blocking(move || file_sync::do_get_file_change_queue(req.project_path))
+        .await
     {
         Ok(Ok(queue)) => ok(queue),
         Ok(Err(e)) => err(e),
@@ -144,12 +153,7 @@ pub async fn retry_file_change_task(
 ) -> Json<serde_json::Value> {
     let emit: Arc<file_sync::EventEmitter> = Arc::from(make_event_emitter(state.event_tx.clone()));
     match tokio::task::spawn_blocking(move || {
-        file_sync::do_retry_file_change_task(
-            req.project_id,
-            req.project_path,
-            req.task_id,
-            &emit,
-        )
+        file_sync::do_retry_file_change_task(req.project_id, req.project_path, req.task_id, &emit)
     })
     .await
     {
@@ -165,12 +169,7 @@ pub async fn ignore_file_change_task(
 ) -> Json<serde_json::Value> {
     let emit: Arc<file_sync::EventEmitter> = Arc::from(make_event_emitter(state.event_tx.clone()));
     match tokio::task::spawn_blocking(move || {
-        file_sync::do_ignore_file_change_task(
-            req.project_id,
-            req.project_path,
-            req.task_id,
-            &emit,
-        )
+        file_sync::do_ignore_file_change_task(req.project_id, req.project_path, req.task_id, &emit)
     })
     .await
     {

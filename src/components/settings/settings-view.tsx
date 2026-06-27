@@ -20,7 +20,7 @@ import { PanelHeaderWithHelp } from "@/components/layout/panel-header-with-help"
 import { useWikiStore } from "@/stores/wiki-store"
 import { isTauri } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
-import { loadSourceWatchConfig, saveLanguage, loadNovelConfig, loadRerankConfig, normalizeClipServerConfig } from "@/lib/project-store"
+import { loadSourceWatchConfig, saveLanguage, loadNovelConfig, loadRerankConfig } from "@/lib/project-store"
 import type { SettingsDraft, DraftSetter } from "./settings-types"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 import { LlmProviderSection } from "./sections/llm-provider-section"
@@ -81,7 +81,6 @@ function initialDraft(
   multimodal: ReturnType<typeof useWikiStore.getState>["multimodalConfig"],
   outputLanguage: ReturnType<typeof useWikiStore.getState>["outputLanguage"],
   proxy: ReturnType<typeof useWikiStore.getState>["proxyConfig"],
-  clipServer: ReturnType<typeof useWikiStore.getState>["clipServerConfig"],
   scheduledImport: ReturnType<typeof useWikiStore.getState>["scheduledImportConfig"],
   sourceWatch: ReturnType<typeof useWikiStore.getState>["sourceWatchConfig"],
   revisionFeedbackWindowConfig: ReturnType<typeof useWikiStore.getState>["revisionFeedbackWindowConfig"],
@@ -138,8 +137,6 @@ function initialDraft(
     proxyEnabled: proxy.enabled,
     proxyUrl: proxy.url,
     proxyBypassLocal: proxy.bypassLocal,
-    clipServerEnabled: clipServer.enabled,
-    clipServerPort: clipServer.port,
     scheduledImportEnabled: scheduledImport.enabled,
     scheduledImportPath: displayPath,
     scheduledImportInterval: scheduledImport.interval,
@@ -168,8 +165,6 @@ export function SettingsView() {
   const setOutputLanguage = useWikiStore((s) => s.setOutputLanguage)
   const proxyConfig = useWikiStore((s) => s.proxyConfig)
   const setProxyConfig = useWikiStore((s) => s.setProxyConfig)
-  const clipServerConfig = useWikiStore((s) => s.clipServerConfig)
-  const setClipServerConfig = useWikiStore((s) => s.setClipServerConfig)
   const scheduledImportConfig = useWikiStore((s) => s.scheduledImportConfig)
   const setScheduledImportConfig = useWikiStore((s) => s.setScheduledImportConfig)
   const sourceWatchConfig = useWikiStore((s) => s.sourceWatchConfig)
@@ -193,7 +188,6 @@ export function SettingsView() {
       multimodalConfig,
       outputLanguage,
       proxyConfig,
-      clipServerConfig,
       scheduledImportConfig,
       sourceWatchConfig,
       revisionFeedbackWindowConfig,
@@ -272,7 +266,6 @@ export function SettingsView() {
         multimodalConfig,
         outputLanguage,
         proxyConfig,
-        clipServerConfig,
         scheduledImportConfig,
         sourceWatchConfig,
         revisionFeedbackWindowConfig,
@@ -290,7 +283,6 @@ export function SettingsView() {
     multimodalConfig,
     outputLanguage,
     proxyConfig,
-    clipServerConfig,
     scheduledImportConfig,
     sourceWatchConfig,
     revisionFeedbackWindowConfig,
@@ -311,7 +303,6 @@ export function SettingsView() {
       saveRerankConfig,
       saveMultimodalConfig,
       saveProxyConfig,
-      saveClipServerConfig,
       saveScheduledImportConfig,
       saveSourceWatchConfig,
       saveRevisionFeedbackWindowConfig,
@@ -373,10 +364,6 @@ export function SettingsView() {
       url: draft.proxyUrl.trim(),
       bypassLocal: draft.proxyBypassLocal,
     }
-    const newClipServer = normalizeClipServerConfig({
-      enabled: draft.clipServerEnabled,
-      port: draft.clipServerPort,
-    })
 
     setLlmConfig(newLlm)
     await saveLlmConfig(newLlm)
@@ -388,8 +375,6 @@ export function SettingsView() {
     await saveMultimodalConfig(newMultimodal)
     setProxyConfig(newProxy)
     await saveProxyConfig(newProxy)
-    setClipServerConfig(newClipServer)
-    await saveClipServerConfig(newClipServer)
     const newSourceWatch = normalizeSourceWatchConfig(draft.sourceWatchConfig)
     setSourceWatchConfig(newSourceWatch)
     await saveSourceWatchConfig(newSourceWatch, project?.id, project?.path)
@@ -411,7 +396,6 @@ export function SettingsView() {
       if (isTauri()) {
         const { invoke } = await import("@tauri-apps/api/core")
         await invoke<string>("set_proxy_env", { config: newProxy })
-        await invoke("set_clip_server_config", { config: newClipServer })
       }
     } catch (err) {
       console.warn("[settings] live network update failed; restart will still apply:", err)
@@ -466,7 +450,6 @@ export function SettingsView() {
     setRerankConfig,
     setOutputLanguage,
     setProxyConfig,
-    setClipServerConfig,
     setScheduledImportConfig,
     setSourceWatchConfig,
     setRevisionFeedbackWindowConfig,

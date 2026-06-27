@@ -2,6 +2,9 @@
   "bundle": {
     "resources": ["pdfium/pdfium.dll", "../skills"],
     "windows": {
+      "webviewInstallMode": {
+        "type": "skip"
+      },
       "nsis": {
         "template": "windows/_tauri-installer-template.nsi",
         "languages": ["SimpChinese"],

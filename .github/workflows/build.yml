@@ -244,6 +244,29 @@ jobs:
         shell: bash
         run: gh release upload "${{ github.ref_name }}" release-assets/QMaiWrite_*_macOS_* --clobber
 
+      - name: Build Windows portable
+        if: github.event_name == 'push' && matrix.label == 'windows-x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = node -p "require('./package.json').version"
+          node scripts/build-portable.mjs
+          $portableExe = "release-portable/QMaiWrite.exe"
+          if (-not (Test-Path $portableExe)) {
+            throw "便携版 EXE 未生成：$portableExe"
+          }
+          $assetName = "QMaiWrite_${version}_windows_X64_portable.exe"
+          $assetPath = "release-assets/$assetName"
+          New-Item -ItemType Directory -Force -Path "release-assets" | Out-Null
+          Copy-Item $portableExe $assetPath -Force
+
+      - name: Attach Windows portable to release
+        if: github.event_name == 'push' && matrix.label == 'windows-x64'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: gh release upload "${{ github.ref_name }}" release-assets/QMaiWrite_*_portable.exe --clobber
+
       - name: Upload bundles as workflow artifacts
         if: github.event_name == 'workflow_dispatch'
         uses: actions/upload-artifact@v4

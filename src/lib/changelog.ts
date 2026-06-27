@@ -78,6 +78,37 @@ const TWO_POINT_TWO_ELEVEN_CHANGELOG: ChangelogEntry = {
   },
 }
 
+const TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG: ChangelogEntry = {
+  version: "2.2.24",
+  date: "2026-06-26",
+  highlights: {
+    en: [
+      "Outline generator UI overhaul: button-based category selection with male/female channel toggle, multi-select tags, and word-count buttons.",
+      "Added complete genre classification system: 15 categories each for male and female channels, ~435 sub-tags total.",
+      "Added custom tag management: create, persist, and delete custom outline tags.",
+      "Added model selector dropdowns to outline generation dialog, refine dialog, and AI outline chat panel — no longer falls back to global llmConfig; prompts user to select a model if none chosen.",
+      "Model selection auto-saves and restores on next launch, shared across all three outline scenarios.",
+      "Fixed error messages displaying full API response body: now extracts JSON error fields and truncates to 500 chars.",
+      "Fixed outline generator not showing errors due to stale task state synchronization.",
+      "Added V2 prompt template incorporating channel, category, and style tags into generation prompts.",
+      "Added one-click copy for error details including context (channel, category, tags, model, timestamp).",
+      "AI outline chat panel footer layout: dock controls on the left, model selector on the right.",
+    ],
+    zh: [
+      "大纲生成器界面重构：下拉框选择改为按钮式分类选择，新增男频/女频频道切换、多选标签、字数规模按钮组。",
+      "新增完整分类标签体系：男频 15 个分类、女频 15 个分类，共计约 435 个子标签。",
+      "新增自定义标签管理：支持创建、持久化存储和删除自定义大纲标签。",
+      "大纲生成对话框、细化生成对话框、AI大纲会话面板新增模型选择下拉框，不再回退到全局 llmConfig，未选择模型时提示用户选择。",
+      "模型选择自动保存，下次启动自动恢复，三个场景共享同一选择。",
+      "修复错误消息显示完整 API 响应体的问题：现在自动提取 JSON 错误字段并截断到 500 字符。",
+      "修复大纲生成器因任务状态同步问题导致错误信息不显示的问题。",
+      "新增 V2 提示词模板，将频道、分类、风格标签纳入生成提示语。",
+      "新增错误详情一键复制功能，包含频道、分类、标签、模型、时间等上下文信息。",
+      "AI 大纲会话面板底部布局调整：停靠图标在最左侧，模型选择下拉框在最右侧。",
+    ],
+  },
+}
+
 const TWO_POINT_TWO_TWENTY_THREE_CHANGELOG: ChangelogEntry = {
   version: "2.2.23",
   date: "2026-06-25",
@@ -561,6 +592,7 @@ export const CHANGELOG: ChangelogEntry[] = [
 ]
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  if (version === TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_THREE_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_THREE_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_TWO_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_TWO_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_ONE_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_ONE_CHANGELOG]
@@ -589,6 +621,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG,
     TWO_POINT_TWO_TWENTY_THREE_CHANGELOG,
     TWO_POINT_TWO_TWENTY_TWO_CHANGELOG,
     TWO_POINT_TWO_TWENTY_ONE_CHANGELOG,

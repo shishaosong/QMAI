@@ -156,10 +156,18 @@ fn add_dir_to_zip(
     base_dir: &Path,
     zip_prefix: &str,
     file_count: &mut usize,
+    warnings: &mut Vec<String>,
 ) -> Result<(), String> {
     let options =
         zip::write::SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
-    for entry in WalkDir::new(base_dir).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(base_dir).into_iter() {
+        let entry = match entry {
+            Ok(e) => e,
+            Err(e) => {
+                warnings.push(format!("备份遍历跳过: {}", e));
+                continue;
+            }
+        };
         let path = entry.path();
         if path == base_dir {
             continue;
@@ -177,12 +185,13 @@ fn add_dir_to_zip(
             zip.add_directory(&zip_name, options)
                 .map_err(|e| format!("创建 zip 目录失败: {e}"))?;
         } else if entry.file_type().is_file() {
-            let data =
-                fs::read(path).map_err(|e| format!("读取文件失败 {}: {e}", path.display()))?;
+            // 流式写入：逐块读取文件写入 zip，避免大文件全量读入内存
+            let file = fs::File::open(path)
+                .map_err(|e| format!("打开文件失败 {}: {e}", path.display()))?;
             zip.start_file(&zip_name, options)
                 .map_err(|e| format!("创建 zip 文件条目失败: {e}"))?;
-            zip.write_all(&data)
-                .map_err(|e| format!("写入 zip 失败: {e}"))?;
+            let mut reader = std::io::BufReader::new(file);
+            std::io::copy(&mut reader, zip).map_err(|e| format!("写入 zip 失败: {e}"))?;
             *file_count += 1;
         }
     }
@@ -217,6 +226,11 @@ fn extract_dir_from_zip(
         .map(|n| n.to_string())
         .collect();
 
+    // Zip Slip 防护：在循环外只调用一次 canonicalize，避免性能开销和 TOCTOU 风险
+    let canonical_target = target_dir
+        .canonicalize()
+        .map_err(|e| format!("无法解析目标目录: {e}"))?;
+
     for name in names {
         let relative = &name[zip_prefix.len()..];
         let relative = relative.trim_start_matches('/');
@@ -225,10 +239,6 @@ fn extract_dir_from_zip(
         }
 
         let dest_path = target_dir.join(relative);
-
-        // Zip Slip 防护：校验解压目标路径未逃逸出 target_dir
-        let canonical_target = target_dir.canonicalize()
-            .map_err(|e| format!("无法解析目标目录: {e}"))?;
 
         // 逐组件规范化路径，检测 .. 是否逃逸出 target_dir（不依赖文件存在性）
         let mut normalized_dest = canonical_target.clone();
@@ -251,7 +261,8 @@ fn extract_dir_from_zip(
         if !normalized_dest.starts_with(&canonical_target) {
             return Err(format!(
                 "安全拦截：zip 条目 \"{}\" 试图写入目标目录之外的位置 {}",
-                name, normalized_dest.display()
+                name,
+                normalized_dest.display()
             ));
         }
 
@@ -300,8 +311,7 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
         message: "正在准备导出...".to_string(),
     });
 
-    let file = fs::File::create(save_path)
-        .map_err(|e| format!("无法创建备份文件: {e}"))?;
+    let file = fs::File::create(save_path).map_err(|e| format!("无法创建备份文件: {e}"))?;
     let mut zip = ZipWriter::new(file);
 
     let mut file_count: usize = 0;
@@ -400,9 +410,13 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
             let knowledge_path = project_path.join(knowledge_dir);
             if knowledge_path.exists() && knowledge_path.is_dir() {
                 let zip_sub_prefix = format!("{}/{}", zip_prefix, KNOWLEDGE_ZIP_NAME);
-                if let Err(e) =
-                    add_dir_to_zip(&mut zip, &knowledge_path, &zip_sub_prefix, &mut file_count)
-                {
+                if let Err(e) = add_dir_to_zip(
+                    &mut zip,
+                    &knowledge_path,
+                    &zip_sub_prefix,
+                    &mut file_count,
+                    &mut warnings,
+                ) {
                     warnings.push(format!(
                         "复制项目 {} 的知识目录({})失败: {}",
                         project.name, knowledge_dir, e
@@ -416,9 +430,13 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
             let subdir_path = project_path.join(subdir);
             if subdir_path.exists() && subdir_path.is_dir() {
                 let zip_sub_prefix = format!("{}/{}", zip_prefix, subdir);
-                if let Err(e) =
-                    add_dir_to_zip(&mut zip, &subdir_path, &zip_sub_prefix, &mut file_count)
-                {
+                if let Err(e) = add_dir_to_zip(
+                    &mut zip,
+                    &subdir_path,
+                    &zip_sub_prefix,
+                    &mut file_count,
+                    &mut warnings,
+                ) {
                     warnings.push(format!(
                         "复制项目 {} 的 {} 目录失败: {}",
                         project.name, subdir, e
@@ -430,9 +448,8 @@ pub fn do_export_backup<F: Fn(&BackupProgressPayload)>(
         for file_name in PROJECT_FILES {
             let file_path = project_path.join(file_name);
             if file_path.exists() && file_path.is_file() {
-                let data = fs::read(&file_path).map_err(|e| {
-                    format!("读取文件失败 {}: {e}", file_path.display())
-                })?;
+                let data = fs::read(&file_path)
+                    .map_err(|e| format!("读取文件失败 {}: {e}", file_path.display()))?;
                 let zip_name = format!("{}/{}", zip_prefix, file_name);
                 zip.start_file(&zip_name, options)
                     .map_err(|e| format!("创建 zip 文件条目失败: {e}"))?;
@@ -501,10 +518,9 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
         message: "正在准备导入...".to_string(),
     });
 
-    let file = fs::File::open(zip_path)
-        .map_err(|e| format!("打开备份文件失败: {e}"))?;
-    let mut archive = zip::ZipArchive::new(file)
-        .map_err(|e| format!("读取备份文件失败，可能已损坏: {e}"))?;
+    let file = fs::File::open(zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("读取备份文件失败，可能已损坏: {e}"))?;
 
     let mut warnings: Vec<String> = Vec::new();
     let mut app_state: Option<serde_json::Value> = None;
@@ -540,15 +556,13 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
             message: "正在恢复全局配置...".to_string(),
         });
 
-        if let Some(app_state_bytes) =
-            extract_file_from_zip(&mut archive, "global/app-state.json")?
+        if let Some(app_state_bytes) = extract_file_from_zip(&mut archive, "global/app-state.json")?
         {
             let app_state_json: serde_json::Value = serde_json::from_slice(&app_state_bytes)
                 .map_err(|e| format!("解析 app-state.json 失败: {e}"))?;
 
             // 直接写入磁盘文件
-            fs::create_dir_all(app_state_dir)
-                .map_err(|e| format!("创建数据目录失败: {e}"))?;
+            fs::create_dir_all(app_state_dir).map_err(|e| format!("创建数据目录失败: {e}"))?;
             let app_state_path = app_state_dir.join("app-state.json");
             let app_state_str = serde_json::to_string_pretty(&app_state_json)
                 .map_err(|e| format!("序列化 app-state 失败: {e}"))?;
@@ -558,9 +572,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
             app_state = Some(app_state_json);
         }
 
-        if let Some(ls_bytes) =
-            extract_file_from_zip(&mut archive, "global/local-storage.json")?
-        {
+        if let Some(ls_bytes) = extract_file_from_zip(&mut archive, "global/local-storage.json")? {
             let ls_json: serde_json::Value = serde_json::from_slice(&ls_bytes)
                 .map_err(|e| format!("解析 local-storage.json 失败: {e}"))?;
             local_storage_data = Some(ls_json);
@@ -574,12 +586,10 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
     if need_projects {
         let projects_to_restore: Vec<(String, String, String)> = match &params.strategy {
-            ImportStrategy::Full => {
-                manifest_projects
-                    .iter()
-                    .map(|p| (p.id.clone(), p.path.clone(), p.name.clone()))
-                    .collect()
-            }
+            ImportStrategy::Full => manifest_projects
+                .iter()
+                .map(|p| (p.id.clone(), p.path.clone(), p.name.clone()))
+                .collect(),
             ImportStrategy::Selective => params
                 .projects
                 .as_ref()
@@ -601,7 +611,8 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
 
         let total = projects_to_restore.len();
 
-        for (idx, (project_id, target_path, project_name)) in projects_to_restore.iter().enumerate() {
+        for (idx, (project_id, target_path, project_name)) in projects_to_restore.iter().enumerate()
+        {
             on_progress(&BackupProgressPayload {
                 operation: "import".to_string(),
                 stage: "restoring".to_string(),
@@ -620,10 +631,7 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
                 Ok(_count) => {
                     // 导入后自动迁移目录（wiki -> QM，.llm-wiki -> .qmai 等）
                     if let Err(e) = crate::commands::project::migrate_project_dirs(target) {
-                        warnings.push(format!(
-                            "项目 {} 目录迁移失败: {}",
-                            project_name, e
-                        ));
+                        warnings.push(format!("项目 {} 目录迁移失败: {}", project_name, e));
                     }
                     project_results.push(ProjectRestoreResult {
                         id: project_id.clone(),
@@ -654,8 +662,12 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
         message: "导入完成".to_string(),
     });
 
+    // 顶层 success：只有在没有任何项目恢复失败且无错误时才为 true
+    let any_project_failed = project_results.iter().any(|p| !p.success);
+    let overall_success = !any_project_failed;
+
     Ok(ImportResult {
-        success: true,
+        success: overall_success,
         app_state,
         local_storage_data,
         projects: project_results,
@@ -693,7 +705,14 @@ pub async fn export_backup(
 
         let app_clone = app.clone();
         do_export_backup(params, &app_state_path, move |payload| {
-            emit_progress(&app_clone, &payload.operation, &payload.stage, payload.current, payload.total, &payload.message);
+            emit_progress(
+                &app_clone,
+                &payload.operation,
+                &payload.stage,
+                payload.current,
+                payload.total,
+                &payload.message,
+            );
         })
     })
 }
@@ -711,7 +730,14 @@ pub async fn import_backup(
 
         let app_clone = app.clone();
         let result = do_import_backup(params, &app_data_dir, move |payload| {
-            emit_progress(&app_clone, &payload.operation, &payload.stage, payload.current, payload.total, &payload.message);
+            emit_progress(
+                &app_clone,
+                &payload.operation,
+                &payload.stage,
+                payload.current,
+                payload.total,
+                &payload.message,
+            );
         })?;
 
         // 通过 plugin-store API 恢复，确保内存中的缓存状态也被替换，
@@ -728,8 +754,8 @@ pub async fn import_backup(
 mod tests {
     use super::*;
     use std::io::Write;
-    use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
 
     #[test]
     fn test_extract_dir_rejects_path_traversal() {
@@ -740,7 +766,8 @@ mod tests {
         let zip_path = tmp.join("evil.zip");
         let zip_file = std::fs::File::create(&zip_path).unwrap();
         let mut zip = ZipWriter::new(zip_file);
-        zip.start_file("prefix/../../../../evil.txt", SimpleFileOptions::default()).unwrap();
+        zip.start_file("prefix/../../../../evil.txt", SimpleFileOptions::default())
+            .unwrap();
         zip.write_all(b"malicious").unwrap();
         zip.finish().unwrap();
 
@@ -752,8 +779,14 @@ mod tests {
         let err = result.unwrap_err();
         assert!(err.contains("安全拦截"), "错误信息应包含安全拦截: {}", err);
 
-        assert!(!tmp.join("evil.txt").exists(), "evil.txt 不应存在于临时目录");
-        assert!(!std::env::temp_dir().join("evil.txt").exists(), "evil.txt 不应存在于上级目录");
+        assert!(
+            !tmp.join("evil.txt").exists(),
+            "evil.txt 不应存在于临时目录"
+        );
+        assert!(
+            !std::env::temp_dir().join("evil.txt").exists(),
+            "evil.txt 不应存在于上级目录"
+        );
 
         std::fs::remove_dir_all(&tmp).ok();
     }
@@ -767,9 +800,11 @@ mod tests {
         let zip_path = tmp.join("normal.zip");
         let zip_file = std::fs::File::create(&zip_path).unwrap();
         let mut zip = ZipWriter::new(zip_file);
-        zip.start_file("prefix/chapter1.md", SimpleFileOptions::default()).unwrap();
+        zip.start_file("prefix/chapter1.md", SimpleFileOptions::default())
+            .unwrap();
         zip.write_all("# 第一章".as_bytes()).unwrap();
-        zip.start_file("prefix/sub/chapter2.md", SimpleFileOptions::default()).unwrap();
+        zip.start_file("prefix/sub/chapter2.md", SimpleFileOptions::default())
+            .unwrap();
         zip.write_all("# 第二章".as_bytes()).unwrap();
         zip.finish().unwrap();
 

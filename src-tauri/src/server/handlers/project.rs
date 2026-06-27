@@ -4,7 +4,9 @@ use axum::Json;
 use serde::Deserialize;
 
 use crate::commands::fs::resolve_project_storage_path;
-use crate::commands::project::{create_project_impl, migrate_project_dirs, validate_wiki_project_root};
+use crate::commands::project::{
+    create_project_impl, migrate_project_dirs, validate_wiki_project_root,
+};
 use crate::types::wiki::WikiProject;
 
 // ── Request types ──────────────────────────────────────────────────

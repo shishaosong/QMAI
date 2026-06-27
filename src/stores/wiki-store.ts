@@ -279,6 +279,8 @@ export interface NovelConfig {
   communitySummaryInterval: number
   /** 社区摘要后台异步执行：开启后不阻塞章节摄取，关闭则同步等待（默认开）。 */
   communitySummaryAsync: boolean
+  /** 生成章节时自动输出标题：开启后AI在正文开头输出 # 第X章 标题名 格式的标题，保存时自动使用（默认开）。 */
+  autoGenerateChapterTitle: boolean
 }
 
 export const DEFAULT_NOVEL_CONFIG: NovelConfig = {
@@ -299,6 +301,7 @@ export const DEFAULT_NOVEL_CONFIG: NovelConfig = {
   communitySummaryEnabled: true,
   communitySummaryInterval: 5,
   communitySummaryAsync: true,
+  autoGenerateChapterTitle: true,
 }
 
 export interface RevisionFeedbackWindowConfig {
@@ -532,7 +535,7 @@ interface WikiState {
   finalChapterSave: FinalChapterSaveState | null
   lintRun: LintRunState | null
   reviewRun: ReviewRunState | null
-  theme: "light" | "dark" | "deep-blue"
+  theme: "light" | "dark" | "deep-blue" | "system"
   uiFontSizeScale: number
   dataVersion: number
 
@@ -594,7 +597,7 @@ interface WikiState {
   setReviewRun: (reviewRun: ReviewRunState | null) => void
   finishReviewRun: (runId: string, reviewRun: ReviewRunFinishState) => void
   clearTransientTaskState: () => void
-  setTheme: (theme: "light" | "dark" | "deep-blue") => void
+  setTheme: (theme: "light" | "dark" | "deep-blue" | "system") => void
   setUiFontSizeScale: (scale: number) => void
   bumpDataVersion: () => void
 }
@@ -745,7 +748,7 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   sourceWatchConfig: DEFAULT_SOURCE_WATCH_CONFIG,
 
-  novelMode: false,
+  novelMode: true,
   chatEditModeEnabled: false,
   novelConfig: { ...DEFAULT_NOVEL_CONFIG },
   communitySummaryError: null,
@@ -760,7 +763,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   finalChapterSave: null,
   lintRun: null,
   reviewRun: null,
-  theme: "light",
+  theme: "system",
   uiFontSizeScale: readStoredUiFontSizeScale(),
 
   setLlmConfig: (llmConfig) => set({ llmConfig }),

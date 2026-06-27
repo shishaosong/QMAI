@@ -123,7 +123,8 @@
     "switch": "切换主题",
     "toDark": "切换到深色模式",
     "toDeepBlue": "切换到深蓝护眼模式",
-    "toLight": "切换到浅色模式"
+    "toLight": "切换到浅色模式",
+    "toSystem": "切换到跟随系统"
   },
   "iconSidebar": {
     "toggleSidebar": "展开或隐藏章节栏",
@@ -663,17 +664,7 @@
         "url": "代理地址",
         "urlHelp": "完整 URL，必须带协议头。支持：http://、https://（当前版本不支持 SOCKS5）。",
         "bypassLocal": "本地地址不走代理（推荐）",
-        "bypassLocalHelp": "对 localhost、127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16 以及 *.local 的请求会绕过代理。如果你用 Ollama / LM Studio 或局域网内的 LLM 服务，请保持开启。",
-        "clipServerTitle": "网页剪藏端口",
-        "clipServerDescription": "浏览器剪藏插件会连接这个本地端口。端口被占用时，可以换一个端口后重新打开。",
-        "clipServerEnable": "启用网页剪藏端口",
-        "clipServerPort": "端口",
-        "clipServerPortHelp": "默认 19827。建议使用 1024 到 65535 之间未被占用的端口。",
-        "clipServerPortInvalid": "端口必须在 1024 到 65535 之间。",
-        "clipServerOpen": "打开端口",
-        "clipServerClose": "关闭端口",
-        "clipServerRefresh": "刷新状态",
-        "clipServerStatus": "当前状态：{{status}}，端口：{{port}}"
+        "bypassLocalHelp": "对 localhost、127.0.0.0/8、10.0.0.0/8、172.16.0.0/12、192.168.0.0/16 以及 *.local 的请求会绕过代理。如果你用 Ollama / LM Studio 或局域网内的 LLM 服务，请保持开启。"
       },
       "sourceWatch": {
         "title": "资料文件夹自动监控",
@@ -806,7 +797,6 @@
         "title": "关于",
         "description": "构建信息和运行时状态。",
         "version": "版本",
-        "clipServer": "Clip 服务",
         "appDescription": "一个由 LLM 驱动的个人知识库。源代码："
       }
     }
@@ -1048,6 +1038,10 @@
       "contextTokenBudget": "上下文 Token 预算",
       "contextTokenBudgetHint": "0 表示无限制",
       "contextTokenBudgetHelp": "限制一次小说写作或资料提取时可注入的上下文 Token 数量，避免提示词过长。设置为 0 时不做额外限制。",
+      "chatHistoryLength": "对话历史长度",
+      "chatHistoryLengthHint": "每次请求发给 AI 的历史消息条数。多 = 上下文更完整但更费 token。",
+      "chatHistoryLengthHelp": "控制 AI 会话中每次请求携带多少条历史消息。数量越多，AI 记得的上下文越完整，但消耗的 token 也越多。",
+      "chatHistoryLengthCurrent": "当前 {{count}} 条消息（约 {{turns}} 轮对话）",
       "chapterTargetChars": "单章目标字数",
       "chapterTargetCharsHint": "控制 AI 生成单章正文的目标字数（按去除空白后的字符数计）。章节生成、扩写补足和“继续生成下一章”的提示词都会按这个目标推算，默认 3000 字。",
       "autoIngestOnSave": "保存正式章节时自动提取记忆",

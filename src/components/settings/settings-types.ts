@@ -56,8 +56,6 @@ export interface SettingsDraft {
   proxyEnabled: boolean
   proxyUrl: string
   proxyBypassLocal: boolean
-  clipServerEnabled: boolean
-  clipServerPort: number
 
   // Scheduled Import
   scheduledImportEnabled: boolean

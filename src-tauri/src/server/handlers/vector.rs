@@ -1,5 +1,5 @@
-use axum::Json;
 use axum::extract::Query;
+use axum::Json;
 use serde::Deserialize;
 
 use crate::commands::vectorstore;
@@ -91,15 +91,21 @@ pub async fn vector_count(Query(req): Query<ProjectPathReq>) -> Json<serde_json:
     }
 }
 
-pub async fn vector_upsert_chunks(Json(req): Json<VectorUpsertChunksReq>) -> Json<serde_json::Value> {
+pub async fn vector_upsert_chunks(
+    Json(req): Json<VectorUpsertChunksReq>,
+) -> Json<serde_json::Value> {
     match vectorstore::do_vector_upsert_chunks(req.project_path, req.page_id, req.chunks).await {
         Ok(()) => ok(serde_json::Value::Null),
         Err(e) => err(e),
     }
 }
 
-pub async fn vector_search_chunks(Json(req): Json<VectorSearchChunksReq>) -> Json<serde_json::Value> {
-    match vectorstore::do_vector_search_chunks(req.project_path, req.query_embedding, req.top_k).await {
+pub async fn vector_search_chunks(
+    Json(req): Json<VectorSearchChunksReq>,
+) -> Json<serde_json::Value> {
+    match vectorstore::do_vector_search_chunks(req.project_path, req.query_embedding, req.top_k)
+        .await
+    {
         Ok(results) => ok(results),
         Err(e) => err(e),
     }

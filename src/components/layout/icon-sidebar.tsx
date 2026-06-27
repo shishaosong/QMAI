@@ -8,24 +8,24 @@ import { useTranslation } from "react-i18next"
 import logoImg from "@/assets/QM-LOGO.png"
 import type { WikiState } from "@/stores/wiki-store"
 import { saveTheme } from "@/lib/project-store"
+import { applyTheme } from "@/lib/theme-utils"
 
 type NavView = WikiState["activeView"]
 
-const SEARCH_NAV_ITEM: { view: NavView; icon: typeof FileText; labelKey: string; novelLabelKey: string } = {
+const SEARCH_NAV_ITEM: { view: NavView; icon: typeof FileText; labelKey: string } = {
   view: "search",
   icon: Search,
-  labelKey: "nav.search",
-  novelLabelKey: "novel.nav.search",
+  labelKey: "novel.nav.search",
 }
 
-const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string; novelLabelKey: string }[] = [
-  { view: "wiki", icon: FileText, labelKey: "nav.wiki", novelLabelKey: "novel.nav.wiki" },
-  { view: "sources", icon: FolderOpen, labelKey: "nav.sources", novelLabelKey: "novel.nav.sources" },
-  { view: "graph", icon: Network, labelKey: "nav.graph", novelLabelKey: "novel.nav.graph" },
-  { view: "lint", icon: Brain, labelKey: "nav.lint", novelLabelKey: "novel.nav.lint" },
-  { view: "soul", icon: Sparkles, labelKey: "nav.soul", novelLabelKey: "novel.nav.soul" },
-  { view: "bookAnalysis", icon: BookOpen, labelKey: "nav.dismantling", novelLabelKey: "novel.nav.dismantling" },
-  { view: "reviewCenter", icon: LayoutDashboard, labelKey: "nav.reviewCenter", novelLabelKey: "novel.nav.reviewCenter" },
+const NAV_ITEMS: { view: NavView; icon: typeof FileText; labelKey: string }[] = [
+  { view: "wiki", icon: FileText, labelKey: "novel.nav.wiki" },
+  { view: "sources", icon: FolderOpen, labelKey: "novel.nav.sources" },
+  { view: "graph", icon: Network, labelKey: "novel.nav.graph" },
+  { view: "lint", icon: Brain, labelKey: "novel.nav.lint" },
+  { view: "soul", icon: Sparkles, labelKey: "novel.nav.soul" },
+  { view: "bookAnalysis", icon: BookOpen, labelKey: "novel.nav.dismantling" },
+  { view: "reviewCenter", icon: LayoutDashboard, labelKey: "novel.nav.reviewCenter" },
 ]
 
 interface IconSidebarProps {
@@ -41,27 +41,19 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
   const setSearchPanelOpen = useWikiStore((s) => s.setSearchPanelOpen)
   const selectedFile = useWikiStore((s) => s.selectedFile)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
-  const novelMode = useWikiStore((s) => s.novelMode)
   const theme = useWikiStore((s) => s.theme)
   const setTheme = useWikiStore((s) => s.setTheme)
   const pendingCount = useReviewStore((s) => s.items.filter((i) => !i.resolved).length)
 
   const handleCycleTheme = () => {
-    const themes: ("light" | "dark" | "deep-blue")[] = ["light", "dark", "deep-blue"]
+    const themes: ("light" | "dark" | "deep-blue" | "system")[] = ["system", "light", "dark", "deep-blue"]
     const currentIndex = themes.indexOf(theme)
     const nextIndex = (currentIndex + 1) % themes.length
     const nextTheme = themes[nextIndex]
     
     setTheme(nextTheme)
     saveTheme(nextTheme)
-    
-    // 更新 html 类
-    document.documentElement.classList.remove("dark", "deep-blue")
-    if (nextTheme === "dark") {
-      document.documentElement.classList.add("dark")
-    } else if (nextTheme === "deep-blue") {
-      document.documentElement.classList.add("deep-blue")
-    }
+    applyTheme(nextTheme)
   }
 
   const getThemeIcon = () => {
@@ -69,15 +61,17 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
       case "light": return <Sun className="h-5 w-5" />
       case "dark": return <Moon className="h-5 w-5" />
       case "deep-blue": return <Monitor className="h-5 w-5" />
+      case "system": return <ArrowLeftRight className="h-5 w-5" />
       default: return <Sun className="h-5 w-5" />
     }
   }
 
   const getThemeTooltip = () => {
     switch (theme) {
+      case "system": return t("theme.toLight")
       case "light": return t("theme.toDark")
       case "dark": return t("theme.toDeepBlue")
-      case "deep-blue": return t("theme.toLight")
+      case "deep-blue": return t("theme.toSystem")
       default: return t("theme.switch")
     }
   }
@@ -93,7 +87,6 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
       setSelectedFile(null)
     }
     if (
-      novelMode &&
       view === "sources" &&
       normalizedSelectedFile &&
       !normalizedSelectedFile.includes("/wiki/outlines/")
@@ -125,7 +118,7 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
         </button>
         {/* Top: main nav items */}
         <div className="flex flex-1 flex-col items-center gap-1">
-          {NAV_ITEMS.map(({ view, icon: Icon, labelKey, novelLabelKey }) => (
+          {NAV_ITEMS.map(({ view, icon: Icon, labelKey }) => (
             <Tooltip key={view}>
               <TooltipTrigger
                 onClick={() => handleNavClick(view)}
@@ -143,7 +136,7 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
                 )}
               </TooltipTrigger>
               <TooltipContent side="right">
-                {t(novelMode ? novelLabelKey : labelKey)}
+                {t(labelKey)}
                 {view === "reviewCenter" && pendingCount > 0 && ` (${pendingCount})`}
               </TooltipContent>
             </Tooltip>
@@ -160,7 +153,7 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
               <Search className="h-5 w-5" />
             </TooltipTrigger>
             <TooltipContent side="right">
-              {t(novelMode ? SEARCH_NAV_ITEM.novelLabelKey : SEARCH_NAV_ITEM.labelKey)}
+              {t(SEARCH_NAV_ITEM.labelKey)}
             </TooltipContent>
           </Tooltip>
           <Tooltip>
@@ -210,7 +203,7 @@ export function IconSidebar({ onToggleSidebar, onOpenSidebar, onSwitchProject }:
               <Settings className="h-5 w-5" />
             </TooltipTrigger>
             <TooltipContent side="right">
-              {t(novelMode ? "novel.nav.settings" : "nav.settings")}
+              {t("novel.nav.settings")}
             </TooltipContent>
           </Tooltip>
           <Tooltip>

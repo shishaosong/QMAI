@@ -184,7 +184,6 @@ export function DataManagementSection() {
             {([
               { value: "full" as const, label: "完全覆盖（清除当前所有数据）" },
               { value: "global-only" as const, label: "仅导入全局配置（模型、UI偏好）" },
-              { value: "selective" as const, label: "选择性导入项目" },
             ]).map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 text-sm cursor-pointer">
                 <input
@@ -222,7 +221,7 @@ export function DataManagementSection() {
                 <CheckCircle2 className="h-4 w-4 mt-0.5 flex-shrink-0" />
                 <div>
                   <p>{t("settings.sections.dataManagement.importSuccess", { defaultValue: "导入成功，项目数据已自动刷新，部分全局配置可能需要重启生效" })}</p>
-                  {importResult.projects.length > 0 && (
+                  {importResult.projects?.length > 0 && (
                     <p className="text-muted-foreground">
                       {t("settings.sections.dataManagement.restoredProjects", {
                         defaultValue: "已恢复 {{count}} 个项目",
@@ -238,14 +237,14 @@ export function DataManagementSection() {
                 <p>{importResult.error}</p>
               </div>
             )}
-            {importResult.warnings.length > 0 && (
+            {importResult.warnings?.length > 0 && (
               <div className="text-yellow-600 text-xs space-y-1">
                 {importResult.warnings.map((w, i) => (
                   <p key={i}>⚠ {w}</p>
                 ))}
               </div>
             )}
-            {importResult.projects.some((p) => !p.success) && (
+            {importResult.projects?.some((p) => !p.success) && (
               <div className="text-red-600 text-xs space-y-1">
                 {importResult.projects.filter((p) => !p.success).map((p, i) => (
                   <p key={i}>✗ {p.id}: {p.error}</p>

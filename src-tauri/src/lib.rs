@@ -1,8 +1,8 @@
-pub mod server;
 mod clip_server;
 mod commands;
 mod panic_guard;
 mod proxy;
+pub mod server;
 mod types;
 
 use panic_guard::run_guarded;
@@ -146,6 +146,7 @@ pub fn run() {
             commands::claude_cli::claude_cli_spawn,
             commands::claude_cli::claude_cli_kill,
             commands::codex_cli::codex_cli_detect,
+            commands::codex_cli::codex_cli_list_models,
             commands::codex_cli::codex_cli_spawn,
             commands::codex_cli::codex_cli_kill,
             commands::extract_images::extract_pdf_images_cmd,
@@ -193,10 +194,49 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building tauri application")
+        .unwrap_or_else(|e| {
+            // 启动失败时显示友好的错误信息，而非裸 panic
+            let msg = format!("应用程序启动失败: {e}");
+            eprintln!("{msg}");
+            // 尝试弹出 Windows 消息框（不依赖 Tauri 运行时）
+            #[cfg(windows)]
+            {
+                use std::ffi::OsStr;
+                use std::os::windows::ffi::OsStrExt;
+                extern "system" {
+                    fn MessageBoxW(
+                        hwnd: *mut std::ffi::c_void,
+                        lp_text: *const u16,
+                        lp_caption: *const u16,
+                        u_type: u32,
+                    ) -> i32;
+                }
+                fn to_wide(s: &str) -> Vec<u16> {
+                    OsStr::new(s)
+                        .encode_wide()
+                        .chain(std::iter::once(0))
+                        .collect()
+                }
+                let text = to_wide(&msg);
+                let caption = to_wide("启动错误");
+                unsafe {
+                    MessageBoxW(
+                        std::ptr::null_mut(),
+                        text.as_ptr(),
+                        caption.as_ptr(),
+                        0x10, // MB_ICONERROR
+                    );
+                }
+            }
+            std::process::exit(1);
+        })
         .run(|app, event| {
             #[cfg(target_os = "macos")]
-            if let tauri::RunEvent::Reopen { has_visible_windows, .. } = event {
+            if let tauri::RunEvent::Reopen {
+                has_visible_windows,
+                ..
+            } = event
+            {
                 if !has_visible_windows {
                     use tauri::Manager;
                     if let Some(window) = app.get_webview_window("main") {

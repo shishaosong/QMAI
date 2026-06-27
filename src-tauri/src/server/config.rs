@@ -25,9 +25,15 @@ pub struct AppSection {
     pub open_browser: bool,
 }
 
-fn default_host() -> String { "127.0.0.1".to_string() }
-fn default_port() -> u16 { 5800 }
-fn default_true() -> bool { true }
+fn default_host() -> String {
+    "127.0.0.1".to_string()
+}
+fn default_port() -> u16 {
+    5800
+}
+fn default_true() -> bool {
+    true
+}
 fn default_allowed_origins() -> Vec<String> {
     vec![
         "http://localhost:5800".to_string(),

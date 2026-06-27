@@ -51,9 +51,9 @@ describe("chapter save preview sync regression", () => {
   it("always routes AI chapter saves to the next chapter instead of reusing the current chapter", () => {
     const source = readFileSync(resolve(__dirname, "chat-panel.tsx"), "utf8")
 
-    expect(source).toContain('if (strategy.action === "direct_explicit_target_new")')
-    expect(source).toContain("const nextNum = await getNextChapterNumber(pp)")
-    expect(source).toContain("setChapterSaveStatus(`已保存为第${nextNum}章草稿`)")
+    expect(source).toContain('strategy.action === "direct_explicit_target_new"')
+    expect(source).toContain("await getNextChapterNumber(pp)")
+    expect(source).toContain("setChapterSaveStatus(`已保存为${chapterTitle}`)")
   })
 
   it("no longer uses the pending chapter save dialog flow", () => {

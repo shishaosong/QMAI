@@ -1,15 +1,5 @@
-import { describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 import { contextPackToPrompt, type ContextPack } from "./context-engine"
-
-vi.mock("@/lib/http-adapter", () => ({
-  httpProject: {},
-  httpFs: {},
-  httpClip: {},
-  httpBackup: {},
-  httpCli: {},
-  httpSync: {},
-  httpVector: {},
-}))
 
 const basePack: ContextPack = {
   task: "生成第2章正文",

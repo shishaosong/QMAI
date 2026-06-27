@@ -9,6 +9,12 @@ import {
   Trash2,
   RotateCcw,
   Clock,
+  HelpCircle,
+  ChevronDown,
+  ChevronUp,
+  BookOpen,
+  Users,
+  Lightbulb,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -260,6 +266,9 @@ export function MaintenanceSection() {
               "让大模型扫描全部实体 / 概念页面，并把那些很可能只是名称不同、实则指向同一主题的条目分组出来（例如中英文名称、单复数、简称与全称）。每组都需要你确认后才会合并。合并任务会进入队列并逐个执行，以保持交叉引用一致。",
           })}
         </p>
+
+        {/* 小说写作场景详细说明 */}
+        <NovelScenarioHelp />
 
         {!projectReady && (
           <p className="text-xs text-amber-700 dark:text-amber-400">
@@ -647,6 +656,116 @@ function DuplicateGroupCard({
         <div className="flex items-start gap-1.5 rounded border border-rose-500/40 bg-rose-500/5 px-2 py-1.5 text-xs text-rose-700 dark:text-rose-400">
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
           <div>{task.error}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── 小说写作场景详细说明 ───────────────────────────────────────────────────────
+
+function NovelScenarioHelp() {
+  const { t } = useTranslation()
+  const [open, setOpen] = useState(false)
+
+  return (
+    <div className="rounded-md border border-border/40 bg-background/60">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+      >
+        <HelpCircle className="h-3.5 w-3.5 shrink-0" />
+        <span className="flex-1">
+          {t("settings.sections.maintenance.dedup.novelHelpTitle", {
+            defaultValue: "写小说的话，这个功能有什么用？",
+          })}
+        </span>
+        {open ? (
+          <ChevronUp className="h-3.5 w-3.5 shrink-0" />
+        ) : (
+          <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+        )}
+      </button>
+      {open && (
+        <div className="space-y-3 border-t border-border/40 px-3 py-3 text-xs leading-relaxed text-muted-foreground">
+          <p>
+            {t("settings.sections.maintenance.dedup.novelHelpIntro", {
+              defaultValue:
+                "简单说：当你的角色库、设定库里出现了「同一个人/同一个东西有好几个页面」的情况，这个工具能帮你找出来并合并成一个。",
+            })}
+          </p>
+
+          <div className="space-y-2">
+            <div className="flex items-start gap-2">
+              <Users className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground/70" />
+              <div>
+                <div className="font-medium text-foreground/80">
+                  {t("settings.sections.maintenance.dedup.novelHelpExample1Title", {
+                    defaultValue: "角色重复（最常见）",
+                  })}
+                </div>
+                <p>
+                  {t("settings.sections.maintenance.dedup.novelHelpExample1", {
+                    defaultValue:
+                      "比如 AI 一会儿叫「张三」、一会儿叫「张小三」、一会儿又叫「男主」，其实是同一个人。每出现一个新名字，就会多出一个角色页面。",
+                  })}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2">
+              <BookOpen className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground/70" />
+              <div>
+                <div className="font-medium text-foreground/80">
+                  {t("settings.sections.maintenance.dedup.novelHelpExample2Title", {
+                    defaultValue: "设定/功法/地名重复",
+                  })}
+                </div>
+                <p>
+                  {t("settings.sections.maintenance.dedup.novelHelpExample2", {
+                    defaultValue:
+                      "比如「九阳神功」和「九阳真经」、「青云宗」和「青云派」，名字略有不同但说的是一回事，资料库会越攒越乱。",
+                  })}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2">
+              <Lightbulb className="mt-0.5 h-3.5 w-3.5 shrink-0 text-foreground/70" />
+              <div>
+                <div className="font-medium text-foreground/80">
+                  {t("settings.sections.maintenance.dedup.novelHelpHowTitle", {
+                    defaultValue: "合并之后会怎样？",
+                  })}
+                </div>
+                <ul className="list-disc space-y-0.5 pl-4">
+                  <li>
+                    {t("settings.sections.maintenance.dedup.novelHelpHow1", {
+                      defaultValue: "两个页面的内容会合二为一，不会丢信息",
+                    })}
+                  </li>
+                  <li>
+                    {t("settings.sections.maintenance.dedup.novelHelpHow2", {
+                      defaultValue: "所有章节里引用了旧名字的地方，会自动改成新名字，不会有死链",
+                    })}
+                  </li>
+                  <li>
+                    {t("settings.sections.maintenance.dedup.novelHelpHow3", {
+                      defaultValue: "合并前会自动备份，合并错了也能恢复",
+                    })}
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <p className="pt-1 text-[11px] text-muted-foreground/70">
+            {t("settings.sections.maintenance.dedup.novelHelpTip", {
+              defaultValue:
+                "💡 小提示：扫描结果只是 AI 的猜测，需要你确认后才会真正合并。觉得不是重复的可以点「不是重复」，下次扫描就不会再出现了。",
+            })}
+          </p>
         </div>
       )}
     </div>

@@ -1,6 +1,4 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event"
-import { isTauri } from "@/lib/platform"
-import { serverEvents } from "@/lib/server-events"
 import { readFile, listDirectory } from "@/commands/fs"
 import {
   rescanProjectFiles,
@@ -23,8 +21,8 @@ import {
 } from "@/lib/source-lifecycle"
 import { isPathAllowedBySourceWatch, normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 
-let unlistenQueue: UnlistenFn | (() => void) | null = null
-let unlistenChanged: UnlistenFn | (() => void) | null = null
+let unlistenQueue: UnlistenFn | null = null
+let unlistenChanged: UnlistenFn | null = null
 let startSeq = 0
 let refreshTimer: ReturnType<typeof setTimeout> | null = null
 let pendingRefreshPaths = new Set<string>()
@@ -41,32 +39,16 @@ export async function startProjectFileSync(
   useFileSyncStore.getState().setRunning(true)
   useFileSyncStore.getState().setLastError(null)
 
-  if (isTauri()) {
-    unlistenQueue = await listen<FileSyncPayload>("file-sync://queue-updated", (event) => {
-      if (event.payload.projectId !== useWikiStore.getState().project?.id) return
-      useFileSyncStore.getState().setTasks(event.payload.tasks)
-    })
+  unlistenQueue = await listen<FileSyncPayload>("file-sync://queue-updated", (event) => {
+    if (event.payload.projectId !== useWikiStore.getState().project?.id) return
+    useFileSyncStore.getState().setTasks(event.payload.tasks)
+  })
 
-    unlistenChanged = await listen<FileSyncPayload>("file-sync://changed", (event) => {
-      const current = useWikiStore.getState().project
-      if (!current || event.payload.projectId !== current.id) return
-      scheduleRefreshAfterFileChanges(event.payload.tasks)
-    })
-  } else {
-    serverEvents.connect()
-    unlistenQueue = serverEvents.on("file-sync://queue-updated", (event) => {
-      const payload = event.payload as FileSyncPayload
-      if (payload.projectId !== useWikiStore.getState().project?.id) return
-      useFileSyncStore.getState().setTasks(payload.tasks)
-    })
-
-    unlistenChanged = serverEvents.on("file-sync://changed", (event) => {
-      const payload = event.payload as FileSyncPayload
-      const current = useWikiStore.getState().project
-      if (!current || payload.projectId !== current.id) return
-      scheduleRefreshAfterFileChanges(payload.tasks)
-    })
-  }
+  unlistenChanged = await listen<FileSyncPayload>("file-sync://changed", (event) => {
+    const current = useWikiStore.getState().project
+    if (!current || event.payload.projectId !== current.id) return
+    scheduleRefreshAfterFileChanges(event.payload.tasks)
+  })
 
   try {
     const queue = await startProjectFileWatcher(project.id, normalizePath(project.path), activeSourceWatchConfig)

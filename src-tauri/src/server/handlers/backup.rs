@@ -68,12 +68,10 @@ pub async fn import_backup_upload(
         let field_name = field.name().unwrap_or("").to_string();
 
         match field_name.as_str() {
-            "file" => {
-                match field.bytes().await {
-                    Ok(bytes) => file_data = Some(bytes.to_vec()),
-                    Err(e) => return err(format!("读取上传文件失败: {e}")),
-                }
-            }
+            "file" => match field.bytes().await {
+                Ok(bytes) => file_data = Some(bytes.to_vec()),
+                Err(e) => return err(format!("读取上传文件失败: {e}")),
+            },
             "strategy" => {
                 if let Ok(text) = field.text().await {
                     strategy = match text.as_str() {

@@ -58,8 +58,6 @@ import {
   type ChapterImportCandidate,
   type ImportedChapter,
 } from "@/lib/novel/chapter-import"
-import { isTauri } from "@/lib/platform"
-import { httpFs } from "@/lib/http-adapter"
 import { makeChapterFileName, makeDefaultChapterTitle, makeSafeFileSlug } from "@/lib/wiki-filename"
 import { useImportProgressStore } from "@/stores/import-progress-store"
 import { openExternalUrl } from "@/lib/open-external-url"
@@ -232,32 +230,15 @@ export function DismantlingSidebarPanel() {
   async function handleImportDismantlingFiles() {
     if (!project?.path || importing) return
 
-    let candidates: Array<{ path: string; name: string }>
-
-    if (isTauri()) {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const selected = await open({
-        multiple: true,
-        title: "导入拆文文件",
-        filters: [{ name: "文档", extensions: ["txt", "md", "mdx", "doc", "docx"] }],
-      })
-      const paths = Array.isArray(selected) ? selected : selected ? [selected] : []
-      if (paths.length === 0) return
-      candidates = paths.map((path) => ({ path: normalizePath(path), name: getFileName(path) }))
-    } else {
-      // 浏览器模式：使用 HTML file input 选择文件
-      const input = document.createElement("input")
-      input.type = "file"
-      input.multiple = true
-      input.accept = ".txt,.md,.mdx,.doc,.docx"
-      const files = await new Promise<File[] | null>((resolve) => {
-        input.onchange = () => resolve(input.files ? Array.from(input.files) : null)
-        input.click()
-      })
-      if (!files || files.length === 0) return
-      const { paths } = await httpFs.uploadFiles(files)
-      candidates = paths.map((path) => ({ path: normalizePath(path), name: getFileName(path) }))
-    }
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({
+      multiple: true,
+      title: "导入拆文文件",
+      filters: [{ name: "文档", extensions: ["txt", "md", "mdx", "doc", "docx"] }],
+    })
+    const paths = Array.isArray(selected) ? selected : selected ? [selected] : []
+    if (paths.length === 0) return
+    const candidates = paths.map((path) => ({ path: normalizePath(path), name: getFileName(path) }))
 
     await importDismantlingCandidates(candidates, getFileStem(candidates[0]?.name ?? "") || "拆文作品")
   }
@@ -265,35 +246,11 @@ export function DismantlingSidebarPanel() {
   async function handleImportDismantlingFolder() {
     if (!project?.path || importing) return
 
-    let candidates: ChapterImportCandidate[]
-
-    if (isTauri()) {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const selected = await open({ directory: true, title: "导入拆文文件夹" })
-      if (!selected || Array.isArray(selected)) return
-      candidates = await collectChapterImportCandidatesFromFolder(selected)
-      await importDismantlingCandidates(candidates, getFileName(selected) || "拆文作品")
-    } else {
-      // 浏览器模式：使用 HTML file input + webkitdirectory 选择文件夹
-      const input = document.createElement("input")
-      input.type = "file"
-      input.setAttribute("webkitdirectory", "")
-      input.setAttribute("directory", "")
-      const files = await new Promise<File[] | null>((resolve) => {
-        input.onchange = () => resolve(input.files ? Array.from(input.files) : null)
-        input.click()
-      })
-      if (!files || files.length === 0) return
-      const importableFiles = files.filter((f) => {
-        const ext = f.name.split(".").pop()?.toLowerCase() ?? ""
-        return ["txt", "md", "mdx", "doc", "docx"].includes(ext)
-      })
-      if (importableFiles.length === 0) return
-      const relativePaths = importableFiles.map((f) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name)
-      const { tempDir } = await httpFs.uploadFiles(importableFiles, relativePaths)
-      candidates = await collectChapterImportCandidatesFromFolder(tempDir)
-      await importDismantlingCandidates(candidates, getFileName(tempDir) || "拆文作品")
-    }
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({ directory: true, title: "导入拆文文件夹" })
+    if (!selected || Array.isArray(selected)) return
+    const candidates = await collectChapterImportCandidatesFromFolder(selected)
+    await importDismantlingCandidates(candidates, getFileName(selected) || "拆文作品")
   }
 
   async function handleDeleteDismantlingProject(item: DismantlingProject) {
@@ -800,31 +757,14 @@ export function SidebarPanel() {
   async function handleImportChapterFiles() {
     if (!project || chapterImporting) return
 
-    let sourcePaths: string[]
-
-    if (isTauri()) {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const selected = await open({
-        multiple: true,
-        title: "导入章节文件",
-        filters: [{ name: "章节文档", extensions: [...CHAPTER_IMPORT_EXTENSIONS] }],
-      })
-      if (!selected || (Array.isArray(selected) && selected.length === 0)) return
-      sourcePaths = Array.isArray(selected) ? selected : [selected]
-    } else {
-      // 浏览器模式：使用 HTML file input 选择文件
-      const input = document.createElement("input")
-      input.type = "file"
-      input.multiple = true
-      input.accept = CHAPTER_IMPORT_EXTENSIONS.map((ext) => `.${ext}`).join(",")
-      const files = await new Promise<File[] | null>((resolve) => {
-        input.onchange = () => resolve(input.files ? Array.from(input.files) : null)
-        input.click()
-      })
-      if (!files || files.length === 0) return
-      const { paths } = await httpFs.uploadFiles(files)
-      sourcePaths = paths
-    }
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({
+      multiple: true,
+      title: "导入章节文件",
+      filters: [{ name: "章节文档", extensions: [...CHAPTER_IMPORT_EXTENSIONS] }],
+    })
+    if (!selected || (Array.isArray(selected) && selected.length === 0)) return
+    const sourcePaths = Array.isArray(selected) ? selected : [selected]
 
     const memoryDecision = await confirmChapterMemoryExtraction(sourcePaths.length)
     if (memoryDecision === "cancel") return
@@ -849,44 +789,14 @@ export function SidebarPanel() {
   async function handleImportChapterFolder() {
     if (!project || chapterImporting) return
 
-    let candidates: ChapterImportCandidate[]
-
-    if (isTauri()) {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const selected = await open({
-        directory: true,
-        title: "导入章节文件夹",
-      })
-      const selectedFolder = Array.isArray(selected) ? selected[0] : selected
-      if (!selectedFolder || typeof selectedFolder !== "string") return
-      candidates = await collectChapterImportCandidatesFromFolder(selectedFolder)
-    } else {
-      // 浏览器模式：使用 HTML file input + webkitdirectory 选择文件夹
-      const input = document.createElement("input")
-      input.type = "file"
-      input.setAttribute("webkitdirectory", "")
-      input.setAttribute("directory", "")
-      const files = await new Promise<File[] | null>((resolve) => {
-        input.onchange = () => resolve(input.files ? Array.from(input.files) : null)
-        input.click()
-      })
-      if (!files || files.length === 0) return
-      // 过滤可导入的文件扩展名
-      const importableFiles = files.filter((f) => {
-        const ext = f.name.split(".").pop()?.toLowerCase() ?? ""
-        return CHAPTER_IMPORT_EXTENSIONS.includes(ext as typeof CHAPTER_IMPORT_EXTENSIONS[number])
-      })
-      if (importableFiles.length === 0) {
-        window.alert("没有找到可导入的章节文档。")
-        setChapterImportMenuOpen(false)
-        return
-      }
-      // 上传文件到服务器临时目录，保留相对路径
-      const relativePaths = importableFiles.map((f) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name)
-      const { tempDir } = await httpFs.uploadFiles(importableFiles, relativePaths)
-      // 用临时目录路径收集候选
-      candidates = await collectChapterImportCandidatesFromFolder(tempDir)
-    }
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({
+      directory: true,
+      title: "导入章节文件夹",
+    })
+    const selectedFolder = Array.isArray(selected) ? selected[0] : selected
+    if (!selectedFolder || typeof selectedFolder !== "string") return
+    const candidates = await collectChapterImportCandidatesFromFolder(selectedFolder)
 
     if (candidates.length === 0) {
       window.alert("没有找到可导入的章节文档。")
@@ -917,36 +827,19 @@ export function SidebarPanel() {
   async function handleImportOutlineFiles() {
     if (!project || outlineImporting) return
 
-    let sourcePaths: string[]
-
-    if (isTauri()) {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const selected = await open({
-        multiple: true,
-        title: t("novel.outlineImport.importFilesTitle", { defaultValue: "导入大纲文件" }),
-        filters: [
-          {
-            name: t("novel.outlineImport.documentFilter", { defaultValue: "文档" }),
-            extensions: [...OUTLINE_IMPORT_EXTENSIONS],
-          },
-        ],
-      })
-      if (!selected || (Array.isArray(selected) && selected.length === 0)) return
-      sourcePaths = Array.isArray(selected) ? selected : [selected]
-    } else {
-      // 浏览器模式：使用 HTML file input 选择文件
-      const input = document.createElement("input")
-      input.type = "file"
-      input.multiple = true
-      input.accept = OUTLINE_IMPORT_EXTENSIONS.map((ext) => `.${ext}`).join(",")
-      const files = await new Promise<File[] | null>((resolve) => {
-        input.onchange = () => resolve(input.files ? Array.from(input.files) : null)
-        input.click()
-      })
-      if (!files || files.length === 0) return
-      const { paths } = await httpFs.uploadFiles(files)
-      sourcePaths = paths
-    }
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({
+      multiple: true,
+      title: t("novel.outlineImport.importFilesTitle", { defaultValue: "导入大纲文件" }),
+      filters: [
+        {
+          name: t("novel.outlineImport.documentFilter", { defaultValue: "文档" }),
+          extensions: [...OUTLINE_IMPORT_EXTENSIONS],
+        },
+      ],
+    })
+    if (!selected || (Array.isArray(selected) && selected.length === 0)) return
+    const sourcePaths = Array.isArray(selected) ? selected : [selected]
 
     setOutlineImporting(true)
     try {
@@ -973,43 +866,13 @@ export function SidebarPanel() {
   async function handleImportOutlineFolder() {
     if (!project || outlineImporting) return
 
-    let candidates: Array<{ path: string; name: string; targetFolders: string[] }>
-
-    if (isTauri()) {
-      const { open } = await import("@tauri-apps/plugin-dialog")
-      const selected = await open({
-        directory: true,
-        title: t("novel.outlineImport.importFolderTitle", { defaultValue: "导入大纲文件夹" }),
-      })
-      if (!selected || typeof selected !== "string") return
-      candidates = await collectOutlineImportCandidatesFromFolder(selected)
-    } else {
-      // 浏览器模式：使用 HTML file input + webkitdirectory 选择文件夹
-      const input = document.createElement("input")
-      input.type = "file"
-      input.setAttribute("webkitdirectory", "")
-      input.setAttribute("directory", "")
-      const files = await new Promise<File[] | null>((resolve) => {
-        input.onchange = () => resolve(input.files ? Array.from(input.files) : null)
-        input.click()
-      })
-      if (!files || files.length === 0) return
-      // 过滤可导入的文件扩展名
-      const importableFiles = files.filter((f) => {
-        const ext = f.name.split(".").pop()?.toLowerCase() ?? ""
-        return OUTLINE_IMPORT_EXTENSIONS.includes(ext as typeof OUTLINE_IMPORT_EXTENSIONS[number])
-      })
-      if (importableFiles.length === 0) {
-        window.alert(t("novel.outlineImport.emptyResult", { defaultValue: "没有找到可导入的大纲文档。" }))
-        setOutlineImportMenuOpen(false)
-        return
-      }
-      // 上传文件到服务器临时目录，保留相对路径
-      const relativePaths = importableFiles.map((f) => (f as File & { webkitRelativePath?: string }).webkitRelativePath || f.name)
-      const { tempDir } = await httpFs.uploadFiles(importableFiles, relativePaths)
-      // 用临时目录路径收集候选
-      candidates = await collectOutlineImportCandidatesFromFolder(tempDir)
-    }
+    const { open } = await import("@tauri-apps/plugin-dialog")
+    const selected = await open({
+      directory: true,
+      title: t("novel.outlineImport.importFolderTitle", { defaultValue: "导入大纲文件夹" }),
+    })
+    if (!selected || typeof selected !== "string") return
+    const candidates = await collectOutlineImportCandidatesFromFolder(selected)
 
     if (candidates.length === 0) {
       window.alert(t("novel.outlineImport.emptyResult", { defaultValue: "没有找到可导入的大纲文档。" }))

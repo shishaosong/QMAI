@@ -1,30 +1,10 @@
-import { useEffect, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { getClipServerConfig, type ClipServerRuntimeConfig } from "@/commands/clip-server"
 
 export function AboutSection() {
   const { t } = useTranslation()
-  const [clipServer, setClipServer] = useState<ClipServerRuntimeConfig | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    getClipServerConfig()
-      .then((config) => {
-        if (alive) setClipServer(config)
-      })
-      .catch(() => {
-        if (alive) setClipServer({ enabled: true, port: 19827, status: "unknown" })
-      })
-    return () => {
-      alive = false
-    }
-  }, [])
-  const clipStatus = clipServer?.status ?? "..."
-  const clipPort = clipServer?.port ?? 19827
 
   const rows: Array<{ label: string; value: string; mono?: boolean }> = [
     { label: t("settings.sections.about.version"), value: `v${__APP_VERSION__}`, mono: true },
-    { label: t("settings.sections.about.clipServer"), value: `${clipStatus}  @  127.0.0.1:${clipPort}`, mono: true },
   ]
 
   return (

@@ -19,7 +19,7 @@ import { readFile, writeFile, createDirectory, deleteFile } from "@/commands/fs"
 import { searchWiki, tokenizeQuery } from "@/lib/search"
 import { detectLastGeneratedChapterNumber, findChapterFileByNumber, getNextChapterNumber, readSelectedChapterNumberForFile, resolveTargetChapterNumberForChat } from "@/lib/novel/chapter-utils"
 import { buildQmQuaiSystemPrompt, injectDeAiDirective } from "@/lib/novel/de-ai-adapter"
-import { cleanGeneratedChapterContentForSave } from "@/lib/novel/chapter-content-cleanup"
+import { cleanGeneratedChapterContentWithTitle } from "@/lib/novel/chapter-content-cleanup"
 import { normalizePath, getFileName, getRelativePath } from "@/lib/path-utils"
 import { refreshProjectState } from "@/lib/project-refresh"
 import { getOutputLanguage, buildLanguageReminder } from "@/lib/output-language"
@@ -233,7 +233,10 @@ export function ChatPanel() {
     setIsSavingChapter(true)
     setChapterSaveStatus("")
     try {
-      const cleanedContent = cleanGeneratedChapterContentForSave(getCopyableAssistantContent(content))
+      // 使用带标题提取的清理函数
+      const { content: cleanedContent, title: extractedTitle } = cleanGeneratedChapterContentWithTitle(
+        getCopyableAssistantContent(content),
+      )
       const selectedChapterNumber = await readSelectedChapterNumberForFile(selectedFile)
       const generatedTargetChapterNumber = detectGeneratedTargetChapterNumber(cleanedContent)
       const explicitTargetPath = generatedTargetChapterNumber ? await findChapterFileByNumber(pp, generatedTargetChapterNumber) : null
@@ -244,38 +247,36 @@ export function ChatPanel() {
         generatedTargetExists: Boolean(explicitTargetPath),
       })
 
-      const buildDraftContent = (chapterNumber: number) => {
-        const chapterTitle = `第${chapterNumber}章`
+      // 确定目标章节号
+      const targetChapterNumber = strategy.action === "direct_explicit_target_new"
+        ? strategy.targetChapterNumber
+        : await getNextChapterNumber(pp)
+
+      // 使用 AI 生成的标题，如果没有则回退到默认标题
+      const chapterTitle = extractedTitle || `第${targetChapterNumber}章`
+
+      const buildDraftContent = (chapterNumber: number, title: string, bodyContent: string) => {
         const now = new Date().toISOString().slice(0, 10)
         const frontmatter = [
           "---",
           "type: chapter",
           `chapter_number: ${chapterNumber}`,
           "chapter_status: draft",
-          `title: "${chapterTitle}"`,
+          `title: "${title}"`,
           `created: ${now}`,
           "---",
           "",
         ].join("\n")
-        return `${frontmatter}# ${chapterTitle}\n\n${cleanedContent}\n`
+        // 正文内容已经包含标题行，直接拼接即可
+        return `${frontmatter}${bodyContent}\n`
       }
 
-      if (strategy.action === "direct_explicit_target_new") {
-        const chapterDir = `${pp}/wiki/chapters`
-        await createDirectory(chapterDir)
-        const chapterPath = `${chapterDir}/chapter-${String(strategy.targetChapterNumber).padStart(3, "0")}.md`
-        await writeFile(chapterPath, buildDraftContent(strategy.targetChapterNumber))
-        setChapterSaveStatus(`已创建并保存到第${strategy.targetChapterNumber}章`)
-        useWikiStore.getState().setSelectedFile(chapterPath)
-      } else {
-        const nextNum = await getNextChapterNumber(pp)
-        const chapterDir = `${pp}/wiki/chapters`
-        await createDirectory(chapterDir)
-        const chapterPath = `${chapterDir}/chapter-${String(nextNum).padStart(3, "0")}.md`
-        await writeFile(chapterPath, buildDraftContent(nextNum))
-        setChapterSaveStatus(`已保存为第${nextNum}章草稿`)
-        useWikiStore.getState().setSelectedFile(chapterPath)
-      }
+      const chapterDir = `${pp}/wiki/chapters`
+      await createDirectory(chapterDir)
+      const chapterPath = `${chapterDir}/chapter-${String(targetChapterNumber).padStart(3, "0")}.md`
+      await writeFile(chapterPath, buildDraftContent(targetChapterNumber, chapterTitle, cleanedContent))
+      setChapterSaveStatus(`已保存为${chapterTitle}`)
+      useWikiStore.getState().setSelectedFile(chapterPath)
 
       await refreshProjectState(pp)
       useWikiStore.getState().setActiveView("wiki")
@@ -870,10 +871,11 @@ export function ChatPanel() {
             ? [
                 "## 小说章节输出规则",
                 "- 如果用户要求生成、续写或改写章节，只输出可直接放入章节库的小说正文。",
+                "- 正文第一行必须是章节标题，格式为：# 第X章 标题名（标题4-12字，概括本章核心内容）。",
                 "- 不要输出资料说明、创作说明、免责声明、后续建议、引用列表或隐藏 cited 注释。",
                 "- 不要在小说正文里写 [[资料名]]、[1]、[2] 这类资料引用标记。",
                 "- 资料只作为内部参考，不能把资料库缺失、基于现有资料等元信息写进章节。",
-              ].join("\n")
+              ].filter(Boolean).join("\n")
             : "",
           "",
           novelMode

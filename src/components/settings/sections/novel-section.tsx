@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useWikiStore } from "@/stores/wiki-store"
-import { saveNovelMode, saveNovelConfig } from "@/lib/project-store"
+import { saveNovelConfig } from "@/lib/project-store"
 
 import { testNovelModel, type TestableNovelModelTask } from "@/lib/novel/novel-model-test"
 import { ChatModelSelector } from "@/components/chat/chat-model-selector"
@@ -20,8 +20,6 @@ interface Props {
 
 export function NovelSection({ draft, setDraft }: Props) {
   const { t } = useTranslation()
-  const novelMode = useWikiStore((s) => s.novelMode)
-  const setNovelMode = useWikiStore((s) => s.setNovelMode)
   const setNovelConfigStore = useWikiStore((s) => s.setNovelConfig)
   const llmConfig = useWikiStore((s) => s.llmConfig)
   const aiChatModel = useWikiStore((s) => s.aiChatModel)
@@ -36,12 +34,6 @@ export function NovelSection({ draft, setDraft }: Props) {
     summary: undefined,
     extract: undefined,
   })
-
-  const handleNovelModeToggle = async () => {
-    const newMode = !novelMode
-    setNovelMode(newMode)
-    await saveNovelMode(newMode, project?.id, project?.path)
-  }
 
   const updateNovelConfig = async (patch: Partial<NovelConfig>) => {
     const newConfig = { ...draft.novelConfig, ...patch }
@@ -121,38 +113,13 @@ export function NovelSection({ draft, setDraft }: Props) {
       <div className="space-y-6">
       <div>
         <h2 className="text-xl font-semibold">
-          {t("settings.sections.novel.title", { defaultValue: "小说模式" })}
+          {t("settings.sections.novel.title", { defaultValue: "小说设置" })}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
           {t("settings.sections.novel.description", {
             defaultValue:
               "项目级写作模式和小说工作流修改反馈窗口控制。",
           })}
-        </p>
-      </div>
-
-      <div className="space-y-2">
-        <Label>{t("novel.mode.label")}</Label>
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={handleNovelModeToggle}
-            className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${
-              novelMode ? "bg-primary" : "bg-input"
-            }`}
-          >
-            <span
-              className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-background shadow-lg ring-0 transition-transform ${
-                novelMode ? "translate-x-5" : "translate-x-0"
-              }`}
-            />
-          </button>
-          <span className="text-sm">
-            {novelMode ? t("novel.mode.enable") : t("novel.mode.disable")}
-          </span>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {t("novel.mode.description")}
         </p>
       </div>
 
@@ -215,17 +182,49 @@ export function NovelSection({ draft, setDraft }: Props) {
 
           <div className="space-y-2">
             <div className="flex items-center gap-1.5">
+              <Label>{t("novel.settings.chatHistoryLength")}</Label>
+              {settingTooltip("chatHistoryLengthHint")}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {[2, 4, 6, 8, 10, 20].map((n) => {
+                const active = draft.maxHistoryMessages === n
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    onClick={() => setDraft("maxHistoryMessages", n)}
+                    className={`rounded-md border px-3 py-1.5 text-sm transition-colors ${
+                      active
+                        ? "border-primary bg-primary text-primary-foreground"
+                        : "border-border hover:bg-accent"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                )
+              })}
+            </div>
+            <p className="text-xs text-muted-foreground">
+              {t("novel.settings.chatHistoryLengthCurrent", {
+                count: draft.maxHistoryMessages,
+                turns: draft.maxHistoryMessages / 2,
+              })}
+            </p>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center gap-1.5">
               <Label>{t("novel.settings.chapterTargetChars")}</Label>
               {settingTooltip("chapterTargetCharsHint")}
             </div>
             <Input
               type="number"
-              min={2000}
-              max={6000}
+              min={500}
+              max={20000}
               step={100}
               value={draft.novelConfig.chapterTargetChars}
               onChange={(e) => updateNovelConfig({
-                chapterTargetChars: Math.max(2000, Math.min(6000, Number(e.target.value) || 3000)),
+                chapterTargetChars: Math.max(500, Math.min(20000, Number(e.target.value) || 3000)),
               })}
               className="w-32"
             />
@@ -426,13 +425,11 @@ export function NovelSection({ draft, setDraft }: Props) {
                               [item.field]: "",
                             } as Partial<NovelConfig>)
                           } else {
-                            // 取消勾选：如果当前模型值为空，使用 AI 会话当前模型作为默认值
-                            if (!modelValue && aiChatModel) {
-                              updateNovelConfig({
-                                [item.field]: aiChatModel,
-                              } as Partial<NovelConfig>)
-                            }
-                          }
+                        // 取消勾选：使用 AI 会话当前模型作为默认值，若为空则填入占位值让用户手动选择
+                        updateNovelConfig({
+                          [item.field]: aiChatModel || " ",
+                        } as Partial<NovelConfig>)
+                      }
                         }}
                         className="h-4 w-4"
                       />

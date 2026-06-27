@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react"
 import { Plus, Trash2, ChevronDown, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore, type ProviderOverride, type SavedModel, type ReasoningConfig } from "@/stores/wiki-store"
 import { ContextSizeSelector } from "../context-size-selector"
@@ -466,9 +467,8 @@ function CustomProviderCardItem({
             <Label htmlFor={`${card.id}-key`} className="text-xs">
               API 密钥
             </Label>
-            <Input
+            <SecretInput
               id={`${card.id}-key`}
-              type="password"
               value={card.apiKey}
               onChange={(e) => onUpdate({ apiKey: e.target.value })}
               placeholder="sk-..."

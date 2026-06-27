@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { SecretInput } from "@/components/ui/secret-input"
 import { Label } from "@/components/ui/label"
 import { useWikiStore } from "@/stores/wiki-store"
 import {
@@ -288,8 +289,7 @@ export function EmbeddingSection({ draft, setDraft }: Props) {
 
             <div className="space-y-2">
               <Label>{t("settings.sections.embedding.apiKey")}</Label>
-              <Input
-                type="password"
+              <SecretInput
                 value={draft.embeddingApiKey}
                 onChange={(e) => setDraft("embeddingApiKey", e.target.value)}
                 placeholder={t("settings.sections.embedding.apiKeyPlaceholder")}

@@ -20,22 +20,6 @@ vi.mock("@/lib/search", () => ({
   searchWiki: mocks.searchWiki,
 }))
 
-vi.mock("@/lib/web-fs", () => ({
-  getWebFs: () => ({
-    readFile: mocks.readFile,
-  }),
-}))
-
-vi.mock("@/lib/http-adapter", () => ({
-  httpProject: {},
-  httpFs: {},
-  httpClip: {},
-  httpBackup: {},
-  httpCli: {},
-  httpSync: {},
-  httpVector: {},
-}))
-
 const context: ContextLoadContext = {
   projectPath: "E:/Novel",
   task: "生成第三章正文",

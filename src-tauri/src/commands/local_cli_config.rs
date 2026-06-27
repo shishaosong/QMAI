@@ -118,7 +118,9 @@ pub fn current_local_cli_environment() -> LocalCliEnvironmentInfo {
         user_profile: std::env::var("USERPROFILE")
             .ok()
             .filter(|v| !v.trim().is_empty()),
-        app_data: std::env::var("APPDATA").ok().filter(|v| !v.trim().is_empty()),
+        app_data: std::env::var("APPDATA")
+            .ok()
+            .filter(|v| !v.trim().is_empty()),
         http_proxy: read_env_any(["HTTP_PROXY", "http_proxy"]),
         https_proxy: read_env_any(["HTTPS_PROXY", "https_proxy"]),
         all_proxy: read_env_any(["ALL_PROXY", "all_proxy"]),
@@ -276,7 +278,10 @@ mod tests {
 
         let env = read_project_local_cli_environment(&path);
         assert!(env.contains(&("OPENAI_API_KEY".to_string(), "sk-project".to_string())));
-        assert!(env.contains(&("ANTHROPIC_API_KEY".to_string(), "anthropic-project".to_string())));
+        assert!(env.contains(&(
+            "ANTHROPIC_API_KEY".to_string(),
+            "anthropic-project".to_string()
+        )));
         assert!(!env.iter().any(|(key, _)| key == "UNSAFE_EXTRA"));
     }
 
@@ -292,7 +297,9 @@ mod tests {
 
     fn env_lock() -> std::sync::MutexGuard<'static, ()> {
         static ENV_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        ENV_MUTEX.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        ENV_MUTEX
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
     }
 
     fn set_env(key: &str, value: Option<&str>) {

@@ -62,7 +62,9 @@ pub async fn write_file(Json(req): Json<WriteFileReq>) -> Json<serde_json::Value
 }
 
 pub async fn write_file_atomic(Json(req): Json<WriteFileReq>) -> Json<serde_json::Value> {
-    match tokio::task::spawn_blocking(move || fs::do_write_file_atomic(&req.path, &req.contents)).await {
+    match tokio::task::spawn_blocking(move || fs::do_write_file_atomic(&req.path, &req.contents))
+        .await
+    {
         Ok(Ok(_)) => ok(serde_json::Value::Null),
         Ok(Err(e)) => err(e),
         Err(e) => err(format!("write_file_atomic join error: {e}")),
@@ -78,7 +80,8 @@ pub async fn list_directory(Json(req): Json<PathReq>) -> Json<serde_json::Value>
 }
 
 pub async fn copy_file(Json(req): Json<CopyReq>) -> Json<serde_json::Value> {
-    match tokio::task::spawn_blocking(move || fs::do_copy_file(&req.source, &req.destination)).await {
+    match tokio::task::spawn_blocking(move || fs::do_copy_file(&req.source, &req.destination)).await
+    {
         Ok(Ok(_)) => ok(serde_json::Value::Null),
         Ok(Err(e)) => err(e),
         Err(e) => err(format!("copy_file join error: {e}")),
@@ -86,7 +89,9 @@ pub async fn copy_file(Json(req): Json<CopyReq>) -> Json<serde_json::Value> {
 }
 
 pub async fn copy_directory(Json(req): Json<CopyReq>) -> Json<serde_json::Value> {
-    match tokio::task::spawn_blocking(move || fs::do_copy_directory(&req.source, &req.destination)).await {
+    match tokio::task::spawn_blocking(move || fs::do_copy_directory(&req.source, &req.destination))
+        .await
+    {
         Ok(Ok(files)) => ok(files),
         Ok(Err(e)) => err(e),
         Err(e) => err(format!("copy_directory join error: {e}")),
@@ -110,7 +115,11 @@ pub async fn delete_file(Json(req): Json<PathReq>) -> Json<serde_json::Value> {
 }
 
 pub async fn find_related_wiki_pages(Json(req): Json<FindRelatedReq>) -> Json<serde_json::Value> {
-    match tokio::task::spawn_blocking(move || fs::do_find_related_wiki_pages(&req.project_path, &req.source_name)).await {
+    match tokio::task::spawn_blocking(move || {
+        fs::do_find_related_wiki_pages(&req.project_path, &req.source_name)
+    })
+    .await
+    {
         Ok(Ok(pages)) => ok(pages),
         Ok(Err(e)) => err(e),
         Err(e) => err(format!("find_related_wiki_pages join error: {e}")),
@@ -200,8 +209,7 @@ pub async fn upload_files(mut multipart: Multipart) -> Json<serde_json::Value> {
         match field_name.as_str() {
             "paths" => {
                 if let Ok(text) = field.text().await {
-                    let _ = serde_json::from_str::<Vec<String>>(&text)
-                        .map(|p| rel_paths = p);
+                    let _ = serde_json::from_str::<Vec<String>>(&text).map(|p| rel_paths = p);
                 }
             }
             "file" => {

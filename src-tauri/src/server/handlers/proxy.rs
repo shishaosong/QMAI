@@ -26,9 +26,7 @@ fn ok<T: serde::Serialize>(data: T) -> Json<serde_json::Value> {
 
 // ── Handlers ───────────────────────────────────────────────────────
 
-pub async fn set_proxy_env(
-    Json(req): Json<SetProxyEnvReq>,
-) -> Json<serde_json::Value> {
+pub async fn set_proxy_env(Json(req): Json<SetProxyEnvReq>) -> Json<serde_json::Value> {
     let config = proxy::ProxyConfig {
         enabled: req.enabled,
         url: req.url,

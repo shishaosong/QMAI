@@ -56,7 +56,9 @@ pub async fn extract_office_images(Json(req): Json<PathReq>) -> Json<serde_json:
     }
 }
 
-pub async fn extract_and_save_pdf_images(Json(req): Json<ExtractAndSaveReq>) -> Json<serde_json::Value> {
+pub async fn extract_and_save_pdf_images(
+    Json(req): Json<ExtractAndSaveReq>,
+) -> Json<serde_json::Value> {
     match tokio::task::spawn_blocking(move || {
         extract_images::extract_and_save_pdf_images(
             &req.source_path,
@@ -73,7 +75,9 @@ pub async fn extract_and_save_pdf_images(Json(req): Json<ExtractAndSaveReq>) -> 
     }
 }
 
-pub async fn extract_and_save_office_images(Json(req): Json<ExtractAndSaveReq>) -> Json<serde_json::Value> {
+pub async fn extract_and_save_office_images(
+    Json(req): Json<ExtractAndSaveReq>,
+) -> Json<serde_json::Value> {
     match tokio::task::spawn_blocking(move || {
         extract_images::extract_and_save_office_images(
             &req.source_path,

@@ -1,6 +1,4 @@
 import { invoke } from "@tauri-apps/api/core"
-import { isTauri } from "@/lib/platform"
-import { httpSync } from "@/lib/http-adapter"
 import type { SourceWatchConfig } from "@/stores/wiki-store"
 import { normalizeSourceWatchConfig } from "@/lib/source-watch-config"
 
@@ -44,9 +42,6 @@ export function startProjectFileWatcher(
   projectPath: string,
   sourceWatchConfig?: SourceWatchConfig,
 ): Promise<FileChangeQueue> {
-  if (!isTauri()) {
-    return httpSync.start(projectId, projectPath, normalizeSourceWatchConfig(sourceWatchConfig)) as Promise<FileChangeQueue>
-  }
   return invoke<FileChangeQueue>("start_project_file_watcher", {
     projectId,
     projectPath,
@@ -55,9 +50,6 @@ export function startProjectFileWatcher(
 }
 
 export function stopProjectFileWatcher(): Promise<void> {
-  if (!isTauri()) {
-    return httpSync.stop() as Promise<void>
-  }
   return invoke<void>("stop_project_file_watcher")
 }
 
@@ -66,9 +58,6 @@ export function rescanProjectFiles(
   projectPath: string,
   sourceWatchConfig?: SourceWatchConfig,
 ): Promise<FileChangeRescanResult> {
-  if (!isTauri()) {
-    return httpSync.rescan(projectId, projectPath, normalizeSourceWatchConfig(sourceWatchConfig)) as Promise<FileChangeRescanResult>
-  }
   return invoke<FileChangeRescanResult>("rescan_project_files", {
     projectId,
     projectPath,
@@ -77,9 +66,6 @@ export function rescanProjectFiles(
 }
 
 export function getFileChangeQueue(projectPath: string): Promise<FileChangeQueue> {
-  if (!isTauri()) {
-    return httpSync.queue(projectPath) as Promise<FileChangeQueue>
-  }
   return invoke<FileChangeQueue>("get_file_change_queue", { projectPath })
 }
 
@@ -88,9 +74,6 @@ export function retryFileChangeTask(
   projectPath: string,
   taskId: string,
 ): Promise<FileChangeQueue> {
-  if (!isTauri()) {
-    return httpSync.retry(projectId, projectPath, taskId) as Promise<FileChangeQueue>
-  }
   return invoke<FileChangeQueue>("retry_file_change_task", { projectId, projectPath, taskId })
 }
 
@@ -99,8 +82,5 @@ export function ignoreFileChangeTask(
   projectPath: string,
   taskId: string,
 ): Promise<FileChangeQueue> {
-  if (!isTauri()) {
-    return httpSync.ignore(projectId, projectPath, taskId) as Promise<FileChangeQueue>
-  }
   return invoke<FileChangeQueue>("ignore_file_change_task", { projectId, projectPath, taskId })
 }

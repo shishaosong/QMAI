@@ -207,7 +207,9 @@ pub async fn codex_cli_detect() -> Result<DetectResult, String> {
 }
 
 #[tauri::command]
-pub async fn codex_cli_list_models(project_path: Option<String>) -> Result<ModelListResult, String> {
+pub async fn codex_cli_list_models(
+    project_path: Option<String>,
+) -> Result<ModelListResult, String> {
     let codex = find_codex_command().await?;
     let project_dir = resolve_cli_project_dir(project_path.as_deref())?;
     let mut cmd = Command::new(&codex);
@@ -376,7 +378,9 @@ pub async fn do_codex_cli_spawn<E: CodexEmitter>(
             if !stderr_text.is_empty() {
                 stderr_text.push('\n');
             }
-            stderr_text.push_str(&format!("Codex CLI timed out after {timeout_minutes} minutes."));
+            stderr_text.push_str(&format!(
+                "Codex CLI timed out after {timeout_minutes} minutes."
+            ));
         } else if stderr_text.len() >= STDERR_LIMIT_BYTES {
             stderr_text.push_str("\n[stderr truncated]");
         }
@@ -422,9 +426,10 @@ pub async fn codex_cli_spawn(
 }
 
 fn codex_spawn_timeout_minutes(value: Option<u64>) -> u64 {
-    value
-        .unwrap_or(DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES)
-        .clamp(MIN_CODEX_SPAWN_TIMEOUT_MINUTES, MAX_CODEX_SPAWN_TIMEOUT_MINUTES)
+    value.unwrap_or(DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES).clamp(
+        MIN_CODEX_SPAWN_TIMEOUT_MINUTES,
+        MAX_CODEX_SPAWN_TIMEOUT_MINUTES,
+    )
 }
 
 fn parse_codex_debug_models(stdout: &str) -> Result<Vec<String>, String> {
@@ -543,7 +548,10 @@ mod tests {
             codex_spawn_timeout_minutes(None),
             DEFAULT_CODEX_SPAWN_TIMEOUT_MINUTES
         );
-        assert_eq!(codex_spawn_timeout_minutes(Some(0)), MIN_CODEX_SPAWN_TIMEOUT_MINUTES);
+        assert_eq!(
+            codex_spawn_timeout_minutes(Some(0)),
+            MIN_CODEX_SPAWN_TIMEOUT_MINUTES
+        );
         assert_eq!(codex_spawn_timeout_minutes(Some(42)), 42);
         assert_eq!(
             codex_spawn_timeout_minutes(Some(999)),
@@ -607,6 +615,9 @@ mod tests {
         }"#;
 
         let models = parse_codex_debug_models(stdout).unwrap();
-        assert_eq!(models, vec!["gpt-5.4-mini".to_string(), "gpt-5.5".to_string()]);
+        assert_eq!(
+            models,
+            vec!["gpt-5.4-mini".to_string(), "gpt-5.5".to_string()]
+        );
     }
 }

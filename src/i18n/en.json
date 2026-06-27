@@ -231,7 +231,8 @@
     "switch": "Switch theme",
     "toDark": "Switch to dark mode",
     "toDeepBlue": "Switch to deep blue eye-care mode",
-    "toLight": "Switch to light mode"
+    "toLight": "Switch to light mode",
+    "toSystem": "Switch to system default"
   },
   "iconSidebar": {
     "toggleSidebar": "Expand or collapse chapter sidebar",
@@ -950,17 +951,7 @@
         "url": "Proxy URL",
         "urlHelp": "Full URL with scheme. Supported: http://, https://. SOCKS5 is not supported in this version.",
         "bypassLocal": "Bypass proxy for local addresses (recommended)",
-        "bypassLocalHelp": "Requests to localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and *.local do not go through the proxy.",
-        "clipServerTitle": "Web clip port",
-        "clipServerDescription": "The browser clip extension connects to this local port. If it is occupied, change the port and open it again.",
-        "clipServerEnable": "Enable web clip port",
-        "clipServerPort": "Port",
-        "clipServerPortHelp": "Default is 19827. Use an available port from 1024 to 65535.",
-        "clipServerPortInvalid": "Port must be between 1024 and 65535.",
-        "clipServerOpen": "Open port",
-        "clipServerClose": "Close port",
-        "clipServerRefresh": "Refresh status",
-        "clipServerStatus": "Current status: {{status}}, port: {{port}}"
+        "bypassLocalHelp": "Requests to localhost, 127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and *.local do not go through the proxy."
       },
       "output": {
         "title": "Output Preferences",
@@ -1002,8 +993,7 @@
       "about": {
         "title": "About",
         "description": "Build information and runtime status.",
-        "version": "Version",
-        "clipServer": "Clip Server"
+        "version": "Version"
       },
       "sourceWatch": {
         "groups": {

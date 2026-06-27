@@ -1,5 +1,5 @@
-use axum::Json;
 use axum::extract::Query;
+use axum::Json;
 use serde::Deserialize;
 use std::path::Path;
 
@@ -51,9 +51,7 @@ fn err(e: String) -> Json<serde_json::Value> {
 
 // ── Handlers ───────────────────────────────────────────────────────
 
-pub async fn analyze_book(
-    Json(req): Json<AnalyzeBookReq>,
-) -> Json<serde_json::Value> {
+pub async fn analyze_book(Json(req): Json<AnalyzeBookReq>) -> Json<serde_json::Value> {
     // 验证配置
     if req.source_type == "file" {
         if let Some(ref path) = req.source_path {
@@ -73,30 +71,22 @@ pub async fn analyze_book(
     ok(serde_json::json!({"taskId": task_id}))
 }
 
-pub async fn get_book_analysis_status(
-    Query(req): Query<TaskIdReq>,
-) -> Json<serde_json::Value> {
+pub async fn get_book_analysis_status(Query(req): Query<TaskIdReq>) -> Json<serde_json::Value> {
     // TODO: 从状态管理中获取进度
     ok(serde_json::json!({"taskId": req.task_id, "progress": {}}))
 }
 
-pub async fn list_book_analyses(
-    Query(_req): Query<ProjectPathReq>,
-) -> Json<serde_json::Value> {
+pub async fn list_book_analyses(Query(_req): Query<ProjectPathReq>) -> Json<serde_json::Value> {
     // TODO: 从状态管理中获取分析列表
     ok(serde_json::json!([]))
 }
 
-pub async fn delete_book_analysis(
-    Json(req): Json<TaskIdReq>,
-) -> Json<serde_json::Value> {
+pub async fn delete_book_analysis(Json(req): Json<TaskIdReq>) -> Json<serde_json::Value> {
     // TODO: 实现删除逻辑
     ok(serde_json::json!({"taskId": req.task_id}))
 }
 
-pub async fn export_book_analysis(
-    Json(_req): Json<TaskIdReq>,
-) -> Json<serde_json::Value> {
+pub async fn export_book_analysis(Json(_req): Json<TaskIdReq>) -> Json<serde_json::Value> {
     // TODO: 实现导出逻辑
     err("导出功能尚未实现".to_string())
 }

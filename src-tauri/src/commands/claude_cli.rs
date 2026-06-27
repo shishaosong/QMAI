@@ -308,7 +308,9 @@ pub async fn do_claude_cli_list_models(
 }
 
 #[tauri::command]
-pub async fn claude_cli_list_models(project_path: Option<String>) -> Result<ModelListResult, String> {
+pub async fn claude_cli_list_models(
+    project_path: Option<String>,
+) -> Result<ModelListResult, String> {
     do_claude_cli_list_models(project_path).await
 }
 

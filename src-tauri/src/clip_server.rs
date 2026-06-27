@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU8, Ordering};
+use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 use tiny_http::{Header, Method, Response, Server};
@@ -64,7 +64,9 @@ pub fn read_clip_server_config_from_store(store_path: &Path) -> Option<ClipServe
     serde_json::from_value(config.clone()).ok()
 }
 
-pub fn apply_clip_server_config(config: ClipServerConfig) -> Result<ClipServerRuntimeConfig, String> {
+pub fn apply_clip_server_config(
+    config: ClipServerConfig,
+) -> Result<ClipServerRuntimeConfig, String> {
     validate_port(config.port)?;
     let previous_port = CLIP_SERVER_PORT.swap(config.port, Ordering::Relaxed);
 
@@ -150,56 +152,58 @@ pub fn start_clip_server() {
 }
 
 fn run_clip_server_loop() {
-        let mut restart_count: u32 = 0;
-        let cors_headers = vec![
-            Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
-            Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, OPTIONS").unwrap(),
-            Header::from_bytes("Access-Control-Allow-Headers", "Content-Type").unwrap(),
-            Header::from_bytes("Content-Type", "application/json").unwrap(),
-        ];
+    let mut restart_count: u32 = 0;
+    let cors_headers = vec![
+        Header::from_bytes("Access-Control-Allow-Origin", "*").unwrap(),
+        Header::from_bytes("Access-Control-Allow-Methods", "GET, POST, OPTIONS").unwrap(),
+        Header::from_bytes("Access-Control-Allow-Headers", "Content-Type").unwrap(),
+        Header::from_bytes("Content-Type", "application/json").unwrap(),
+    ];
 
-        loop {
-            let port = CLIP_SERVER_PORT.load(Ordering::Relaxed);
-            // Try to bind the port with retries
-            let server = {
-                let mut last_err = String::new();
-                let mut bound = None;
-                for attempt in 1..=MAX_BIND_RETRIES {
-                    match Server::http(format!("127.0.0.1:{}", port)) {
-                        Ok(s) => {
-                            bound = Some(s);
-                            break;
-                        }
-                        Err(e) => {
-                            last_err = format!("{}", e);
-                            eprintln!(
-                                "[Clip Server] Bind attempt {}/{} failed: {}",
-                                attempt, MAX_BIND_RETRIES, e
-                            );
-                            if attempt < MAX_BIND_RETRIES {
-                                thread::sleep(std::time::Duration::from_secs(BIND_RETRY_DELAY_SECS));
-                            }
-                        }
+    loop {
+        let port = CLIP_SERVER_PORT.load(Ordering::Relaxed);
+        // Try to bind the port with retries
+        let server = {
+            let mut last_err = String::new();
+            let mut bound = None;
+            for attempt in 1..=MAX_BIND_RETRIES {
+                match Server::http(format!("127.0.0.1:{}", port)) {
+                    Ok(s) => {
+                        bound = Some(s);
+                        break;
                     }
-                }
-                match bound {
-                    Some(s) => s,
-                    None => {
+                    Err(e) => {
+                        last_err = format!("{}", e);
                         eprintln!(
-                            "[Clip Server] Port {} unavailable after {} attempts: {}",
-                            port, MAX_BIND_RETRIES, last_err
+                            "[Clip Server] Bind attempt {}/{} failed: {}",
+                            attempt, MAX_BIND_RETRIES, e
                         );
-                        DAEMON_STATUS.store(2, Ordering::Relaxed); // port_conflict
-                        return; // Don't retry on port conflict — needs user action
+                        if attempt < MAX_BIND_RETRIES {
+                            thread::sleep(std::time::Duration::from_secs(BIND_RETRY_DELAY_SECS));
+                        }
                     }
                 }
-            };
+            }
+            match bound {
+                Some(s) => s,
+                None => {
+                    eprintln!(
+                        "[Clip Server] Port {} unavailable after {} attempts: {}",
+                        port, MAX_BIND_RETRIES, last_err
+                    );
+                    DAEMON_STATUS.store(2, Ordering::Relaxed); // port_conflict
+                    return; // Don't retry on port conflict — needs user action
+                }
+            }
+        };
 
-            DAEMON_STATUS.store(1, Ordering::Relaxed); // running
-            println!("[Clip Server] Listening on http://127.0.0.1:{}", port);
+        DAEMON_STATUS.store(1, Ordering::Relaxed); // running
+        println!("[Clip Server] Listening on http://127.0.0.1:{}", port);
 
         loop {
-            if STOP_REQUESTED.load(Ordering::Relaxed) || !CLIP_SERVER_ENABLED.load(Ordering::Relaxed) {
+            if STOP_REQUESTED.load(Ordering::Relaxed)
+                || !CLIP_SERVER_ENABLED.load(Ordering::Relaxed)
+            {
                 break;
             }
 
@@ -207,7 +211,9 @@ fn run_clip_server_loop() {
                 Ok(Some(request)) => request,
                 Ok(None) => continue,
                 Err(e) => {
-                    if STOP_REQUESTED.load(Ordering::Relaxed) || !CLIP_SERVER_ENABLED.load(Ordering::Relaxed) {
+                    if STOP_REQUESTED.load(Ordering::Relaxed)
+                        || !CLIP_SERVER_ENABLED.load(Ordering::Relaxed)
+                    {
                         break;
                     }
                     eprintln!("[Clip Server] Receive failed: {}", e);
@@ -237,14 +243,18 @@ fn run_clip_server_loop() {
                     let _ = request.respond(response);
                 }
                 (&Method::Get, "/project") => {
-                    let path = CURRENT_PROJECT.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                    let path = CURRENT_PROJECT
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .clone();
                     // serde_json handles backslash escaping so a Windows
                     // path that somehow still contains `\` won't break
                     // the JSON parser on the client.
                     let body = serde_json::json!({
                         "ok": true,
                         "path": path,
-                    }).to_string();
+                    })
+                    .to_string();
                     let mut response = Response::from_string(body);
                     for h in &cors_headers {
                         response.add_header(h.clone());
@@ -254,8 +264,7 @@ fn run_clip_server_loop() {
                 (&Method::Post, "/project") => {
                     let mut body = String::new();
                     if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                        let err =
-                            format!(r#"{{"ok":false,"error":"Failed to read body: {}"}}"#, e);
+                        let err = format!(r#"{{"ok":false,"error":"Failed to read body: {}"}}"#, e);
                         let mut response = Response::from_string(err).with_status_code(400);
                         for h in &cors_headers {
                             response.add_header(h.clone());
@@ -277,25 +286,37 @@ fn run_clip_server_loop() {
                     let _ = request.respond(response);
                 }
                 (&Method::Get, "/projects") => {
-                    let projects = ALL_PROJECTS.lock().unwrap_or_else(|p| p.into_inner()).clone();
-                    let current = CURRENT_PROJECT.lock().unwrap_or_else(|p| p.into_inner()).clone();
+                    let projects = ALL_PROJECTS
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .clone();
+                    let current = CURRENT_PROJECT
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .clone();
                     // serde_json for proper escaping of `\`, `"`, and any
                     // other characters that might appear in a project name
                     // or path. Previously only `"` was escaped by hand,
                     // which broke on Windows paths containing backslashes.
-                    let items: Vec<serde_json::Value> = projects.iter()
-                        .map(|(name, path)| serde_json::json!({
-                            "name": name,
-                            "path": path,
-                            "current": path == &current,
-                        }))
+                    let items: Vec<serde_json::Value> = projects
+                        .iter()
+                        .map(|(name, path)| {
+                            serde_json::json!({
+                                "name": name,
+                                "path": path,
+                                "current": path == &current,
+                            })
+                        })
                         .collect();
                     let body = serde_json::json!({
                         "ok": true,
                         "projects": items,
-                    }).to_string();
+                    })
+                    .to_string();
                     let mut response = Response::from_string(body);
-                    for h in &cors_headers { response.add_header(h.clone()); }
+                    for h in &cors_headers {
+                        response.add_header(h.clone());
+                    }
                     let _ = request.respond(response);
                 }
                 (&Method::Post, "/projects") => {
@@ -303,7 +324,8 @@ fn run_clip_server_loop() {
                     if request.as_reader().read_to_string(&mut body).is_ok() {
                         if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&body) {
                             if let Some(arr) = parsed["projects"].as_array() {
-                                let mut projects = ALL_PROJECTS.lock().unwrap_or_else(|p| p.into_inner());
+                                let mut projects =
+                                    ALL_PROJECTS.lock().unwrap_or_else(|p| p.into_inner());
                                 projects.clear();
                                 for item in arr {
                                     let name = item["name"].as_str().unwrap_or("").to_string();
@@ -316,7 +338,9 @@ fn run_clip_server_loop() {
                         }
                     }
                     let mut response = Response::from_string(r#"{"ok":true}"#);
-                    for h in &cors_headers { response.add_header(h.clone()); }
+                    for h in &cors_headers {
+                        response.add_header(h.clone());
+                    }
                     let _ = request.respond(response);
                 }
                 (&Method::Get, "/clips/pending") => {
@@ -325,26 +349,31 @@ fn run_clip_server_loop() {
                     // and backslashes — hand-rolled escaping previously
                     // produced invalid JSON on Windows paths containing
                     // \r, \s, etc.
-                    let clips_json: Vec<serde_json::Value> = pending.iter()
-                        .map(|(proj, file)| serde_json::json!({
-                            "projectPath": proj,
-                            "filePath": file,
-                        }))
+                    let clips_json: Vec<serde_json::Value> = pending
+                        .iter()
+                        .map(|(proj, file)| {
+                            serde_json::json!({
+                                "projectPath": proj,
+                                "filePath": file,
+                            })
+                        })
                         .collect();
                     let body = serde_json::json!({
                         "ok": true,
                         "clips": clips_json,
-                    }).to_string();
+                    })
+                    .to_string();
                     pending.clear();
                     let mut response = Response::from_string(body);
-                    for h in &cors_headers { response.add_header(h.clone()); }
+                    for h in &cors_headers {
+                        response.add_header(h.clone());
+                    }
                     let _ = request.respond(response);
                 }
                 (&Method::Post, "/clip") => {
                     let mut body = String::new();
                     if let Err(e) = request.as_reader().read_to_string(&mut body) {
-                        let err =
-                            format!(r#"{{"ok":false,"error":"Failed to read body: {}"}}"#, e);
+                        let err = format!(r#"{{"ok":false,"error":"Failed to read body: {}"}}"#, e);
                         let mut response = Response::from_string(err).with_status_code(400);
                         for h in &cors_headers {
                             response.add_header(h.clone());
@@ -376,29 +405,29 @@ fn run_clip_server_loop() {
             }
         }
 
-            if STOP_REQUESTED.load(Ordering::Relaxed) || !CLIP_SERVER_ENABLED.load(Ordering::Relaxed) {
-                DAEMON_STATUS.store(4, Ordering::Relaxed);
-                return;
-            }
-
-            // Server loop exited (shouldn't happen normally)
-            DAEMON_STATUS.store(3, Ordering::Relaxed); // error
-            restart_count += 1;
-
-            if restart_count >= MAX_RESTART_RETRIES {
-                eprintln!(
-                    "[Clip Server] Exceeded max restarts ({}). Giving up.",
-                    MAX_RESTART_RETRIES
-                );
-                return;
-            }
-
-            eprintln!(
-                "[Clip Server] Crashed. Restarting in {}s (attempt {}/{})",
-                RESTART_DELAY_SECS, restart_count, MAX_RESTART_RETRIES
-            );
-            thread::sleep(std::time::Duration::from_secs(RESTART_DELAY_SECS));
+        if STOP_REQUESTED.load(Ordering::Relaxed) || !CLIP_SERVER_ENABLED.load(Ordering::Relaxed) {
+            DAEMON_STATUS.store(4, Ordering::Relaxed);
+            return;
         }
+
+        // Server loop exited (shouldn't happen normally)
+        DAEMON_STATUS.store(3, Ordering::Relaxed); // error
+        restart_count += 1;
+
+        if restart_count >= MAX_RESTART_RETRIES {
+            eprintln!(
+                "[Clip Server] Exceeded max restarts ({}). Giving up.",
+                MAX_RESTART_RETRIES
+            );
+            return;
+        }
+
+        eprintln!(
+            "[Clip Server] Crashed. Restarting in {}s (attempt {}/{})",
+            RESTART_DELAY_SECS, restart_count, MAX_RESTART_RETRIES
+        );
+        thread::sleep(std::time::Duration::from_secs(RESTART_DELAY_SECS));
+    }
 }
 
 fn handle_set_project(body: &str) -> String {
@@ -488,7 +517,9 @@ fn handle_clip(body: &str) -> String {
 
     let base_name = format!("{}-{}", slug, date_compact);
     // Use PathBuf for cross-platform path construction
-    let dir_path = std::path::Path::new(&project_path).join("raw").join("sources");
+    let dir_path = std::path::Path::new(&project_path)
+        .join("raw")
+        .join("sources");
 
     // Ensure directory exists
     if let Err(e) = std::fs::create_dir_all(&dir_path) {
@@ -524,10 +555,7 @@ fn handle_clip(body: &str) -> String {
     );
 
     if let Err(e) = std::fs::write(&file_path, &markdown) {
-        return format!(
-            r#"{{"ok":false,"error":"Failed to write file: {}"}}"#,
-            e
-        );
+        return format!(r#"{{"ok":false,"error":"Failed to write file: {}"}}"#, e);
     }
 
     // Compute relative path using Path for cross-platform separator handling
@@ -547,5 +575,6 @@ fn handle_clip(body: &str) -> String {
     serde_json::json!({
         "ok": true,
         "path": relative_path,
-    }).to_string()
+    })
+    .to_string()
 }

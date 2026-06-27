@@ -1,5 +1,5 @@
-use axum::response::sse::{Event, Sse};
 use axum::extract::State;
+use axum::response::sse::{Event, Sse};
 use futures::stream::Stream;
 use std::convert::Infallible;
 use std::time::Duration;
@@ -47,8 +47,6 @@ pub async fn sse_events(
             }
         }
     };
-    Sse::new(stream).keep_alive(
-        axum::response::sse::KeepAlive::new()
-            .interval(Duration::from_secs(30)),
-    )
+    Sse::new(stream)
+        .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(30)))
 }
