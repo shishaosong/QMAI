@@ -1,6 +1,6 @@
 import { useRef, useEffect, useCallback, useState } from "react"
 import { useTranslation } from "react-i18next"
-import { BookOpen, Brain, Plus, Trash2, MessageSquare, FileEdit } from "lucide-react"
+import { BookOpen, Brain, Plus, Trash2, MessageSquare, FileEdit, Drama } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -48,6 +48,9 @@ import { isChatEditRequest, resolveChatEditTarget, validateStructuredChapterEdit
 import { backupChapterFile } from "@/lib/novel/chapter-backup"
 import { decideChapterSaveStrategy, detectGeneratedTargetChapterNumber } from "@/lib/novel/chapter-save-strategy"
 import { normalizeChapterEditFile } from "@/lib/novel/chapter-edit-file"
+import { loadBinding } from "@/lib/novel/story-simulation/framework-binding"
+import { loadFrameworks } from "@/lib/novel/story-simulation/framework-store"
+import type { FrameworkBinding, StoryFramework } from "@/lib/novel/story-simulation/types"
 
 function formatDate(timestamp: number): string {
   const d = new Date(timestamp)
@@ -192,7 +195,9 @@ export function ChatPanel() {
 
   const project = useWikiStore((s) => s.project)
   const novelMode = useWikiStore((s) => s.novelMode)
+  const setActiveView = useWikiStore((s) => s.setActiveView)
   const llmConfig = useWikiStore((s) => s.llmConfig)
+  const bindingVersion = useWikiStore((s) => s.bindingVersion)
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const aiChatModel = useWikiStore((s) => s.aiChatModel)
   const setAiChatModel = useWikiStore((s) => s.setAiChatModel)
@@ -213,6 +218,8 @@ export function ChatPanel() {
   const [isSavingChapter, setIsSavingChapter] = useState(false)
   const [pendingSoulDialog, setPendingSoulDialog] = useState({ open: false, summary: "" })
   const [deepChapterEnabled, setDeepChapterEnabled] = useState(false)
+  // 故事框架绑定状态
+  const [activeBinding, setActiveBinding] = useState<{ binding: FrameworkBinding; framework: StoryFramework } | null>(null)
   const closeSoulDialog = useCallback((confirmed: boolean) => {
     const resolver = soulDialogResolverRef.current
     soulDialogResolverRef.current = null
@@ -333,6 +340,37 @@ export function ChatPanel() {
   useEffect(() => {
     userScrolledUpRef.current = false
   }, [activeConversationId])
+
+  // 加载故事框架绑定状态
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      if (!novelMode || !project) {
+        setActiveBinding(null)
+        return
+      }
+      try {
+        const binding = await loadBinding(normalizePath(project.path))
+        if (cancelled || !binding) {
+          setActiveBinding(null)
+          return
+        }
+        const frameworks = await loadFrameworks(normalizePath(project.path))
+        if (cancelled) return
+        const framework = frameworks.find((f) => f.id === binding.frameworkId)
+        if (framework) {
+          setActiveBinding({ binding, framework })
+        } else {
+          setActiveBinding(null)
+        }
+      } catch {
+        if (!cancelled) setActiveBinding(null)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [novelMode, project, bindingVersion])
 
   // 切换会话时不再中断后台生成——每个会话独立运行
 
@@ -1506,6 +1544,47 @@ export function ChatPanel() {
                           </TooltipTrigger>
                           <TooltipContent side="top" className="max-w-xs leading-5">
                             开启后，AI会话会读取当前章节或识别到的章节范围进行修改，并在写回前自动备份原内容。
+                          </TooltipContent>
+                        </Tooltip>
+                        {/* 故事框架绑定状态 */}
+                        <Tooltip>
+                          <TooltipTrigger
+                            render={(
+                              <button
+                                type="button"
+                                onClick={() => setActiveView("storySimulation")}
+                                className={`flex h-8 shrink-0 items-center gap-1 rounded-full border px-2.5 text-xs transition-colors ${
+                                  activeBinding
+                                    ? "border-purple-300 bg-purple-50 text-purple-700 hover:bg-purple-100"
+                                    : "border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+                                }`}
+                              >
+                                <Drama className="h-3.5 w-3.5" />
+                                <span className="max-w-[100px] truncate">
+                                  {activeBinding
+                                    ? activeBinding.framework.shortTitle || activeBinding.framework.title
+                                    : "故事框架"}
+                                </span>
+                              </button>
+                            )}
+                          />
+                          <TooltipContent side="top" className="max-w-xs leading-5">
+                            {activeBinding ? (
+                              <>
+                                <div className="font-medium">已绑定故事框架</div>
+                                <div className="mt-1 text-xs opacity-80">
+                                  {activeBinding.framework.title}
+                                </div>
+                                <div className="mt-1 text-xs opacity-70">
+                                  目标章节数：{activeBinding.binding.targetChapterCount}章
+                                </div>
+                                <div className="mt-1 text-xs opacity-70">
+                                  点击可进入剧情推演室管理
+                                </div>
+                              </>
+                            ) : (
+                              <>未绑定故事框架，点击进入剧情推演室创建</>
+                            )}
                           </TooltipContent>
                         </Tooltip>
                       </>

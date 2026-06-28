@@ -78,6 +78,38 @@ const TWO_POINT_TWO_ELEVEN_CHANGELOG: ChangelogEntry = {
   },
 }
 
+const TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG: ChangelogEntry = {
+  version: "2.2.25",
+  date: "2026-06-28",
+  highlights: {
+    en: [],
+    zh: [
+      "新增剧情推演室（测试版）：支持故事框架生成、多智能体仿真推演、推演报告、角色采访等功能（BETA 测试版）。",
+      "大纲生成器分类体系重构：重新设计大纲生成弹窗，频道升级为男频/女频双频道体系，男频 18 个主分类、女频 18 个主分类，共约 630 个子标签；支持频道切换、主分类选择、风格标签多选、自定义标签添加与删除。",
+      "大纲生成器新增字数规模选择：支持短篇、中篇、长篇、超长篇四档目标字数选择。",
+      "大纲生成模型选择器：大纲生成对话框、细化生成对话框、AI 大纲会话面板均新增模型选择下拉框，不再回退到全局默认配置；未选择模型时明确提示用户选择。",
+      "框架节点拖拽排序：故事框架节点支持拖拽调整顺序，阶段保持不变。",
+      "草稿章节编辑：草稿章节支持直接编辑，原始内容自动备份到 rawContent。",
+      "采访继续对话：角色采访支持继续对话，恢复 Agent 状态追加到旧会话。",
+      "推演报告对比模式：多份推演结果支持对比查看，高亮差异。",
+      "历史采访查看：支持查看历史采访记录。",
+      "推演结果管理：支持多份推演结果保存、删除、草稿保存、时间线保存、框架搜索。",
+      "4 种仿真模式差异化：完成四种仿真模式的差异化配置，支持轮次配置、时间线滚动、对话导出、关系图等。",
+      "主题切换交互优化：侧边栏主题按钮从循环点击改为下拉框选择，支持直接选择「浅色模式」「深色模式」「深蓝护眼」「跟随系统」，当前主题显示勾选标记。",
+      "图标统一优化：「跟随系统」主题图标更换为 SunMoon，不再与「切换项目」按钮图标重复；「深蓝护眼」主题图标更换为眼睛图标，语义更直观。",
+      "修复 AI 会话输入框无法拉高的问题，优化边界检测，向上拖动时不会超出界面下沿，发送消息后自动恢复默认高度。",
+      "修复 AI 大纲输入框无法拉高的问题。",
+      "模型选择逻辑加固：未选择模型时明确提示用户选择，不再静默回退到默认 llmConfig 或本地环境变量；禁用的模型提供方不再参与回退。",
+      "章节号强制解析：普通对话模式下也能正确解析目标章节号，由代码强制计算章节号，不再信任 LLM 输出，避免章节号错乱。",
+      "修复审查中心出现负章节号的问题。",
+      "记忆中心优化：侧边栏章节列表改为按需加载，显示所有章节；快照展示和范围搜索优化。",
+      "修复角色光环 LLM 提取问题，记忆中心章节列表重新设计。",
+      "修复单章目标字数下限截断问题，统一为 500 - 20000 字范围。",
+      "故事框架标题旁添加帮助图标，链接到剧情推演室使用说明。",
+    ],
+  },
+}
+
 const TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG: ChangelogEntry = {
   version: "2.2.24",
   date: "2026-06-26",
@@ -592,6 +624,7 @@ export const CHANGELOG: ChangelogEntry[] = [
 ]
 
 export function currentVersionChangelog(version: string): ChangelogEntry[] {
+  if (version === TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_THREE_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_THREE_CHANGELOG]
   if (version === TWO_POINT_TWO_TWENTY_TWO_CHANGELOG.version) return [TWO_POINT_TWO_TWENTY_TWO_CHANGELOG]
@@ -621,6 +654,7 @@ export function currentVersionChangelog(version: string): ChangelogEntry[] {
 
 export function allChangelog(): ChangelogEntry[] {
   return [
+    TWO_POINT_TWO_TWENTY_FIVE_CHANGELOG,
     TWO_POINT_TWO_TWENTY_FOUR_CHANGELOG,
     TWO_POINT_TWO_TWENTY_THREE_CHANGELOG,
     TWO_POINT_TWO_TWENTY_TWO_CHANGELOG,

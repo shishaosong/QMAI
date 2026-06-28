@@ -310,7 +310,7 @@ export function DashboardView({ headerActions }: DashboardViewProps = {}) {
       return
     }
     const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-    if (!hasUsableLlm(llmConfig)) {
+    if (!hasUsableLlm(llmConfig, useWikiStore.getState().providerConfigs)) {
       showAiRewriteAlert("请先在设置里配置可用的 AI 模型。")
       return
     }

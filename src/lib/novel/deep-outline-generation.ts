@@ -1,4 +1,6 @@
 import type { LlmConfig } from "@/stores/wiki-store"
+import { useWikiStore } from "@/stores/wiki-store"
+import { hasUsableLlm } from "@/lib/has-usable-llm"
 import { streamChat, type ChatMessage, type RequestOverrides, type StreamCallbacks } from "@/lib/llm-client"
 
 export interface DeepOutlineGenerationInput {
@@ -40,6 +42,11 @@ export async function runDeepOutlineGeneration(
   deps: DeepOutlineGenerationDeps = defaultDeps,
   signal?: AbortSignal,
 ): Promise<DeepOutlineGenerationResult> {
+  const { providerConfigs } = useWikiStore.getState()
+  if (!hasUsableLlm(input.llmConfig, providerConfigs)) {
+    throw new Error("请先在设置中配置并选择一个可用的 AI 模型，或在大纲对话中选择模型后再试。")
+  }
+
   const safeContext = ensureString(input.context)
   const safeUserRequest = ensureString(input.userRequest)
   const history = formatRecentHistory(input.historyMessages ?? [])

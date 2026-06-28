@@ -54,6 +54,7 @@ vi.mock("@/stores/wiki-store", () => ({
       llmConfig,
       novelConfig: mocks.novelConfig,
       novelMode: true,
+      providerConfigs: {},
     }),
   },
 }))

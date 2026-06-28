@@ -111,6 +111,14 @@ export async function resolveTargetChapterNumberForChat(input: ResolveTargetChap
   }
 
   if (!shouldResolveNextChapter(input.userRequest, input.routeIntent)) {
+    // general_chat 意图下，尝试从已选文件或上次生成章节推断章节号
+    // 避免上下文包无法构建（阶段1显示"未读取到明确章节目标"）
+    if (input.routeIntent === "general_chat") {
+      const fromSelected = await readSelectedChapterNumber(input.selectedFile)
+      if (fromSelected && fromSelected > 0) return fromSelected
+      const lastGen = input.lastGeneratedChapterNumber ?? 0
+      if (lastGen > 0) return lastGen
+    }
     return undefined
   }
 

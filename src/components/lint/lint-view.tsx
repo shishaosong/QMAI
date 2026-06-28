@@ -35,6 +35,7 @@ export function LintView() {
   const novelMode = useWikiStore((s) => s.novelMode)
   const project = useWikiStore((s) => s.project)
   const llmConfig = useWikiStore((s) => s.llmConfig)
+  const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const selectedFile = useWikiStore((s) => s.selectedFile)
   const fileContent = useWikiStore((s) => s.fileContent)
   const setSelectedFile = useWikiStore((s) => s.setSelectedFile)
@@ -110,7 +111,7 @@ export function LintView() {
       const structural = await runStructuralLint(pp)
       let all = structural
 
-      if (runSemantic && hasUsableLlm(llmConfig)) {
+      if (runSemantic && hasUsableLlm(llmConfig, providerConfigs)) {
         const semantic = await runSemanticLint(pp, llmConfig, {
           chapterContent: novelMode && selectedFile ? fileContent : undefined,
           chapterNumber: meta?.chapterNumber,
@@ -150,7 +151,7 @@ export function LintView() {
         })
       }
     }
-  }, [project, llmConfig, running, runSemantic, fileContent, novelMode, selectedFile, t, loadHistory, setLintRun])
+  }, [project, llmConfig, providerConfigs, running, runSemantic, fileContent, novelMode, selectedFile, t, loadHistory, setLintRun])
 
   async function handleOpenPage(page: string) {
     if (!project) return

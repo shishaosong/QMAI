@@ -769,7 +769,7 @@ export async function listBindableNovelCharacters(projectPath: string): Promise<
         const content = await readFile(file.path)
         const pageTitle = extractPrimaryTitle(content, file.name)
         if (!isCharacterOutlineFile(file.path, pageTitle, content)) continue
-        const extractedNames = extractCharacterNamesFromOutline(content)
+        const extractedNames = await extractCharacterNamesFromOutlineEnhanced(content)
         if (extractedNames.length === 0) {
           addName(pageTitle)
           continue
@@ -989,8 +989,9 @@ async function buildAuraResearchStage(
   input: CustomCharacterAuraGenerationInput,
   previousResearchFiles: Partial<Record<CharacterAuraResearchFileName, string>>,
 ): Promise<string> {
-  const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-  if (hasUsableLlm(llmConfig)) {
+  const state = useWikiStore.getState()
+  const llmConfig = resolveDefaultModel(state.llmConfig)
+  if (hasUsableLlm(llmConfig, state.providerConfigs)) {
     try {
       const raw = await runAuraModelPrompt(
         "你是一名小说角色灵魂研究工作流助手。必须只输出用户要求的 Markdown 正文，不要输出解释，不要输出代码围栏。",
@@ -1008,8 +1009,9 @@ async function synthesizeCustomAuraFields(
   input: CustomCharacterAuraGenerationInput,
   researchFiles: Partial<Record<CharacterAuraResearchFileName, string>>,
 ): Promise<CustomAuraGeneratedFields> {
-  const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
-  if (hasUsableLlm(llmConfig)) {
+  const state = useWikiStore.getState()
+  const llmConfig = resolveDefaultModel(state.llmConfig)
+  if (hasUsableLlm(llmConfig, state.providerConfigs)) {
     try {
       const raw = await runAuraModelPrompt(
         "你是一名小说角色灵魂总结助手。只输出 JSON，不要解释，不要代码围栏。",
@@ -2039,6 +2041,11 @@ const NON_CHARACTER_OUTLINE_TITLE_PATTERNS = [
   /线$/,
   /小队$/,
   /残部$/,
+  // 数字序号开头的非人物标题：1.用途说明、2.关键任务卡、6.一句话总结 等
+  /^\d+[\.\、\s]/,
+  /^第[一二三四五六七八九十\d]+[章节部]/,
+  // 常见非人物章节标题
+  /^(用途说明|关键任务卡|一句话总结|核心冲突|故事梗概|世界观设定|能力体系|时间线|章节细纲|分卷规划)$/,
 ]
 
 function isBindableCharacterOutlineSection(section: OutlineCharacterSection): boolean {
@@ -2097,4 +2104,63 @@ function extractCharacterNamesFromOutline(content: string): string[] {
   }
 
   return [...names]
+}
+
+/**
+ * 使用 LLM 从大纲文本中提取真实人物名称。
+ * 当标题解析结果不足或质量可疑时调用，作为增强提取手段。
+ */
+async function extractCharacterNamesWithLLM(content: string): Promise<string[]> {
+  const state = useWikiStore.getState()
+  const llmConfig = resolveDefaultModel(state.llmConfig)
+  if (!hasUsableLlm(llmConfig, state.providerConfigs)) return []
+
+  const prompt = `请从以下小说大纲/人物设定文本中，提取所有真实的小说人物姓名。
+
+要求：
+1. 只提取真实的人物姓名（如"林烬"、"苏澜"、"杨妙萍"），不要提取章节标题、说明文字、序号等
+2. 不要提取"用途说明"、"关键任务卡"、"一句话总结"等非人物名称
+3. 每行输出一个人物姓名，不要编号，不要任何额外说明
+4. 如果文本中没有明确的人物姓名，输出"无"
+
+文本内容：
+${content.slice(0, 6000)}`
+
+  try {
+    const messages: ChatMessage[] = [
+      { role: "system", content: "你是一个专业的小说人物名称提取助手。只输出人物姓名，每行一个。" },
+      { role: "user", content: prompt },
+    ]
+
+    let result = ""
+    await streamChat(
+      llmConfig,
+      messages,
+      {
+        onToken: (token: string) => { result += token },
+        onDone: () => {},
+        onError: () => {},
+      },
+      AbortSignal.timeout(30000),
+    )
+
+    return result
+      .split("\n")
+      .map((line) => line.replace(/^[\d\.\、\s\-]+/, "").trim())
+      .filter((name) => name.length > 0 && name.length <= 20 && name !== "无")
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 从大纲内容中提取人物名称，优先使用 LLM 提取，回退到标题解析。
+ */
+async function extractCharacterNamesFromOutlineEnhanced(content: string): Promise<string[]> {
+  // 先尝试 LLM 提取
+  const llmNames = await extractCharacterNamesWithLLM(content)
+  if (llmNames.length > 0) return llmNames
+
+  // 回退到标题解析
+  return extractCharacterNamesFromOutline(content)
 }

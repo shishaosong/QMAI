@@ -61,6 +61,7 @@ vi.mock("@/stores/wiki-store", () => ({
       llmConfig,
       novelConfig: { reviewModel: "" },
       novelMode: true,
+      providerConfigs: {},
     }),
   },
 }))

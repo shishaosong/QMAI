@@ -1,10 +1,17 @@
 import { cpSync, existsSync, mkdirSync, rmSync, statSync, writeFileSync, renameSync } from "node:fs"
 import { readFile } from "node:fs/promises"
+import { execSync } from "node:child_process"
 import { dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..")
 const pkg = JSON.parse(await readFile(resolve(root, "package.json"), "utf8"))
+
+let currentBranch = ""
+try {
+  currentBranch = execSync("git rev-parse --abbrev-ref HEAD").toString().trim()
+} catch {}
+const isStorySimulationBranch = currentBranch === "feature-story-simulation"
 
 const releaseExe = resolve(root, "src-tauri/target/release/qmai.exe")
 const portableDevExe = resolve(root, "src-tauri/target/portable-dev/qmai.exe")
@@ -13,7 +20,7 @@ const releasePdfium = resolve(root, "src-tauri/target/release/pdfium/pdfium.dll"
 const portableDevPdfium = resolve(root, "src-tauri/target/portable-dev/pdfium/pdfium.dll")
 const sourcePdfium = existsSync(portableDevPdfium) ? portableDevPdfium : releasePdfium
 const outDir = resolve(root, "release-portable")
-const outExe = resolve(outDir, "QMaiWrite.exe")
+const outExe = resolve(outDir, isStorySimulationBranch ? "QMaiWrite-剧情推演版.exe" : "QMaiWrite.exe")
 const outPdfium = resolve(outDir, "pdfium/pdfium.dll")
 const outSkillDir = resolve(outDir, "skills")
 const manifest = resolve(outDir, "version-info.json")
@@ -77,7 +84,7 @@ if (existsSync(sourceSkillDir)) {
 
 const exeStat = statSync(outExe)
 writeFileSync(manifest, JSON.stringify({
-  productName: "青幕AI写作",
+  productName: isStorySimulationBranch ? "青幕AI写作（剧情推演版）" : "青幕AI写作",
   version: pkg.version,
   builtAt: new Date().toISOString(),
   sourceExe,
@@ -85,7 +92,11 @@ writeFileSync(manifest, JSON.stringify({
   exeBytes: exeStat.size,
   includesPdfium: existsSync(outPdfium),
   includesSkills: existsSync(outSkillDir),
+  ...(isStorySimulationBranch ? { variant: "story-simulation", branch: currentBranch } : {}),
 }, null, 2), "utf8")
 
 console.log(`便携版已生成：${outExe}`)
 console.log(`版本信息：${manifest}`)
+if (isStorySimulationBranch) {
+  console.log("注意：这是测试版，不可上传到 GitHub main 分支")
+}

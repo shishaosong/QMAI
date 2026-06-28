@@ -82,6 +82,7 @@ function findTaskForGroup(
 export function MaintenanceSection() {
   const { t } = useTranslation()
   const llmConfig = useWikiStore((s) => s.llmConfig)
+  const providerConfigs = useWikiStore((s) => s.providerConfigs)
   const project = useWikiStore((s) => s.project)
 
   const [scanState, setScanState] = useState<MaintenanceScanState>(sharedScanState)
@@ -99,7 +100,7 @@ export function MaintenanceSection() {
     return () => clearInterval(id)
   }, [])
 
-  const llmReady = hasUsableLlm(llmConfig)
+  const llmReady = hasUsableLlm(llmConfig, providerConfigs)
   const projectReady = !!project
   const projectScanState = project && scanState.projectPath === project.path ? scanState : emptyScanState
   const { scanning, scanError, groups, scanCompleted } = projectScanState

@@ -60,6 +60,7 @@ export interface MemoryCenterDismantlingProjectPreview {
 export interface MemoryCenterData {
   stats: MemoryCenterStats
   snapshots: MemoryCenterSnapshotCard[]
+  allChapterNumbers: number[]
   files: MemoryCenterFilePreview[]
   dismantlingProjects: MemoryCenterDismantlingProjectPreview[]
 }
@@ -209,8 +210,13 @@ export function buildMemoryCenterSnapshotCards(
   limit = 6,
   maxItemsPerList = 3,
 ): MemoryCenterSnapshotCard[] {
-  return [...snapshots]
-    .sort((left, right) => right.chapterNumber - left.chapterNumber)
+  // 分离章节快照（正数）和大纲快照（负数），章节快照降序排列在前
+  const chapterSnapshots = snapshots.filter((s) => s.chapterNumber > 0)
+  const outlineSnapshots = snapshots.filter((s) => s.chapterNumber < 0)
+  chapterSnapshots.sort((a, b) => b.chapterNumber - a.chapterNumber)
+  outlineSnapshots.sort((a, b) => b.chapterNumber - a.chapterNumber)
+  const sorted = [...chapterSnapshots, ...outlineSnapshots]
+  return sorted
     .slice(0, limit)
     .map((snapshot) => {
       const characterStateChanges = trimList(snapshot.characterStateChanges, maxItemsPerList)
@@ -304,9 +310,14 @@ export async function loadMemoryCenterData(projectPath: string): Promise<MemoryC
     structureMemory: project.structureMemory.slice(0, 5),
   }))
 
+  const allChapterNumbers = allSnapshotCards
+    .filter((c) => c.chapterNumber > 0)
+    .map((c) => c.chapterNumber)
+
   return {
     stats: buildMemoryCenterStats(allSnapshotCards, files),
     snapshots: allSnapshotCards.slice(0, RECENT_SNAPSHOT_CARD_LIMIT),
+    allChapterNumbers,
     files,
     dismantlingProjects,
   }

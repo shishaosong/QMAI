@@ -53,14 +53,15 @@ export async function runNovelLint(
   chapterContent: string,
   chapterNumber?: number,
 ): Promise<NovelLintResult[]> {
+  const state = useWikiStore.getState()
   const llmConfig = resolveNovelModel(
-    useWikiStore.getState().llmConfig,
-    useWikiStore.getState().novelConfig,
+    state.llmConfig,
+    state.novelConfig,
     "lint",
   )
-  if (!hasUsableLlm(llmConfig)) return []
+  if (!hasUsableLlm(llmConfig, state.providerConfigs)) return []
 
-  const novelMode = useWikiStore.getState().novelMode
+  const novelMode = state.novelMode
   if (!novelMode) return []
 
   const contextPack = await buildContextPack(

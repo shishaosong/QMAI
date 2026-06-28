@@ -1,5 +1,13 @@
 import type { ChapterSnapshot } from "./chapter-ingest"
 
+/** 格式化章节标签：负数章节号（大纲快照）使用章节标题，正数使用"第N章" */
+function chapterLabel(snapshot: ChapterSnapshot): string {
+  if (snapshot.chapterNumber < 0) {
+    return snapshot.chapterTitle || `大纲快照(${snapshot.chapterNumber})`
+  }
+  return `第${snapshot.chapterNumber}章`
+}
+
 export interface FactCheckResult {
   severity: "blocking" | "high" | "medium" | "low"
   type: "character_jump" | "location_conflict" | "item_holder_change"
@@ -92,11 +100,11 @@ function checkCharacterJump(
           severity: "blocking",
           type: "character_jump",
           message: `角色"${name}"状态从"${prevState}"跳变到"${currState}"，但中间缺少受伤或治疗事件`,
-          evidenceA: `第${prev.chapterNumber}章：${name}=${prevState}`,
-          evidenceB: `第${curr.chapterNumber}章：${name}=${currState}`,
+          evidenceA: `${chapterLabel(prev)}：${name}=${prevState}`,
+          evidenceB: `${chapterLabel(curr)}：${name}=${currState}`,
           chapters: [prev.chapterNumber, curr.chapterNumber],
           confidence: 1,
-          suggestion: `请在第${prev.chapterNumber}章到第${curr.chapterNumber}章之间补充状态变化事件，或修正角色状态。`,
+          suggestion: `请在${chapterLabel(prev)}到${chapterLabel(curr)}之间补充状态变化事件，或修正角色状态。`,
         })
       }
       continue
@@ -107,8 +115,8 @@ function checkCharacterJump(
         severity: "medium",
         type: "character_jump",
         message: `角色"${name}"状态从"${prevState}"变为"${currState}"，需要确认是否有对应事件支撑`,
-        evidenceA: `第${prev.chapterNumber}章：${name}=${prevState}`,
-        evidenceB: `第${curr.chapterNumber}章：${name}=${currState}`,
+        evidenceA: `${chapterLabel(prev)}：${name}=${prevState}`,
+        evidenceB: `${chapterLabel(curr)}：${name}=${currState}`,
         chapters: [prev.chapterNumber, curr.chapterNumber],
         confidence: 0.7,
         suggestion: "请确认该状态变化是否合理，若合理可忽略。",
@@ -156,8 +164,8 @@ function checkItemHolderChange(
         severity: "medium",
         type: "item_holder_change",
         message: `物品"${itemName}"的持有者从"${prevHolder}"变为"${currHolder}"，但缺少转移事件`,
-        evidenceA: `第${prev.chapterNumber}章：${itemName}由${prevHolder}持有`,
-        evidenceB: `第${curr.chapterNumber}章：${itemName}由${currHolder}持有`,
+        evidenceA: `${chapterLabel(prev)}：${itemName}由${prevHolder}持有`,
+        evidenceB: `${chapterLabel(curr)}：${itemName}由${currHolder}持有`,
         chapters: [prev.chapterNumber, curr.chapterNumber],
         confidence: 0.8,
         suggestion: `请补充"${itemName}"如何从${prevHolder}转移到${currHolder}，或修正持有者信息。`,
@@ -202,8 +210,8 @@ function checkOrgFlip(
         severity: "medium",
         type: "org_flip",
         message: `组织"${orgName}"的领导者从"${prevLeader}"变为"${currLeader}"，但缺少权力变更事件`,
-        evidenceA: `第${prev.chapterNumber}章：${orgName}由${prevLeader}领导`,
-        evidenceB: `第${curr.chapterNumber}章：${orgName}由${currLeader}领导`,
+        evidenceA: `${chapterLabel(prev)}：${orgName}由${prevLeader}领导`,
+        evidenceB: `${chapterLabel(curr)}：${orgName}由${currLeader}领导`,
         chapters: [prev.chapterNumber, curr.chapterNumber],
         confidence: 0.8,
         suggestion: `请补充"${orgName}"权力变更的原因，或修正领导者信息。`,
@@ -242,8 +250,8 @@ function checkTimelineConflict(
           severity: "high",
           type: "timeline_conflict",
           message: `时间线冲突：同一时间点"${prevTime}"出现互相矛盾的事件`,
-          evidenceA: `第${prev.chapterNumber}章：${prevEvent}`,
-          evidenceB: `第${curr.chapterNumber}章：${currEvent}`,
+          evidenceA: `${chapterLabel(prev)}：${prevEvent}`,
+          evidenceB: `${chapterLabel(curr)}：${currEvent}`,
           chapters: [prev.chapterNumber, curr.chapterNumber],
           confidence: 0.9,
           suggestion: `请统一"${prevTime}"这个时间点发生的事件。`,
@@ -294,8 +302,8 @@ function checkSettingConflict(
           severity: "high",
           type: "setting_conflict",
           message: `设定矛盾：关于"${prevSubject}"的描述前后不一致`,
-          evidenceA: `第${prev.chapterNumber}章：${prevFact}`,
-          evidenceB: `第${curr.chapterNumber}章：${currFact}`,
+          evidenceA: `${chapterLabel(prev)}：${prevFact}`,
+          evidenceB: `${chapterLabel(curr)}：${currFact}`,
           chapters: [prev.chapterNumber, curr.chapterNumber],
           confidence: 0.85,
           suggestion: `请统一"${prevSubject}"的设定描述。`,
@@ -362,8 +370,8 @@ function checkRelationshipReversal(
           severity: "medium",
           type: "relationship_reversal",
           message: `关系反转：${pairKey.replace("->", "与")}从"${prevStatus}"变为"${currStatus}"，但缺少过渡事件`,
-          evidenceA: `第${prev.chapterNumber}章：${pairKey.replace("->", "与")}关系=${prevStatus}`,
-          evidenceB: `第${curr.chapterNumber}章：${pairKey.replace("->", "与")}关系=${currStatus}`,
+          evidenceA: `${chapterLabel(prev)}：${pairKey.replace("->", "与")}关系=${prevStatus}`,
+          evidenceB: `${chapterLabel(curr)}：${pairKey.replace("->", "与")}关系=${currStatus}`,
           chapters: [prev.chapterNumber, curr.chapterNumber],
           confidence: 0.75,
           suggestion: "请补充关系变化的原因，或修正关系状态。",
@@ -413,7 +421,7 @@ function checkCausalityBreak(
       severity: "low",
       type: "causality_break",
       message: `事件"${eventName}"引用了可能不存在的前置事件：${detail.cause}`,
-      evidenceA: `第${curr.chapterNumber}章：该事件依赖第${causeChapter}章内容`,
+      evidenceA: `${chapterLabel(curr)}：该事件依赖第${causeChapter}章内容`,
       evidenceB: "当前快照中未找到匹配的前置事件",
       chapters: [causeChapter, curr.chapterNumber],
       confidence: 0.5,
@@ -445,7 +453,7 @@ export async function verifyFactCheckLlm(
       useWikiStore.getState().novelConfig,
       "review",
     )
-    if (!hasUsableLlm(llmConfig)) return results
+    if (!hasUsableLlm(llmConfig, useWikiStore.getState().providerConfigs)) return results
 
     const pendingItems = pendingResults.slice(0, 5)
     const itemsText = pendingItems.map((item, index) => {

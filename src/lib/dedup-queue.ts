@@ -313,9 +313,10 @@ async function processNext(projectId: string): Promise<void> {
   await saveQueue(pp)
   if (currentProjectId !== projectId) return
 
-  const llmConfig = resolveDefaultModel(useWikiStore.getState().llmConfig)
+  const state = useWikiStore.getState()
+  const llmConfig = resolveDefaultModel(state.llmConfig)
 
-  if (!hasUsableLlm(llmConfig)) {
+  if (!hasUsableLlm(llmConfig, state.providerConfigs)) {
     next.status = "failed"
     next.error = "LLM not configured — set API key in Settings"
     processing = false

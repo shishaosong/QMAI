@@ -14,6 +14,8 @@ import { getChapterVolumes } from "./volume"
 import { readSoulDoc } from "./soul-doc"
 import { buildWritingStyleContext } from "./writing-style-store"
 import type { DataSource, ContextLoadContext } from "./context-data-source"
+import { loadFrameworks } from "./story-simulation/framework-store"
+import { loadBinding, buildBindingContext } from "./story-simulation/framework-binding"
 
 // 导入现有的辅助函数
 import {
@@ -442,6 +444,27 @@ export const characterAurasDataSource: DataSource<string> = {
 }
 
 /**
+ * 故事框架绑定数据源
+ * 加载当前激活的框架绑定，构建注入 AI 会话的上下文文本。
+ */
+export const storyFrameworkBindingDataSource: DataSource<string> = {
+  name: "storyFrameworkBinding",
+  priority: 19,
+  async load(context: ContextLoadContext): Promise<string> {
+    try {
+      const binding = await loadBinding(context.projectPath)
+      if (!binding) return ""
+      const frameworks = await loadFrameworks(context.projectPath)
+      const framework = frameworks.find((f) => f.id === binding.frameworkId)
+      if (!framework) return ""
+      return buildBindingContext(binding, framework)
+    } catch {
+      return ""
+    }
+  },
+}
+
+/**
  * 获取所有数据源
  */
 export function getAllDataSources(): DataSource<any>[] {
@@ -464,5 +487,6 @@ export function getAllDataSources(): DataSource<any>[] {
     revisionFeedbackDataSource,
     cognitionTextDataSource,
     soulDocDataSource,
+    storyFrameworkBindingDataSource,
   ]
 }

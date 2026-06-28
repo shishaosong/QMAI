@@ -187,12 +187,13 @@ export async function runSixDimensionReview({
   dimensionKeys?: SixReviewDimensionKey[]
   callbacks?: SixDimensionReviewCallbacks
 }): Promise<Partial<Record<SixReviewDimensionKey, DimensionReviewResult>>> {
+  const state = useWikiStore.getState()
   const llmConfig = resolveNovelModel(
-    useWikiStore.getState().llmConfig,
-    useWikiStore.getState().novelConfig,
+    state.llmConfig,
+    state.novelConfig,
     "review",
   )
-  if (!hasUsableLlm(llmConfig) || !useWikiStore.getState().novelMode) return {}
+  if (!hasUsableLlm(llmConfig, state.providerConfigs) || !state.novelMode) return {}
 
   const contextPack = await buildContextPack(
     projectPath,

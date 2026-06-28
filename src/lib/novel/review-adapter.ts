@@ -169,14 +169,15 @@ export async function reviewChapter(
   signal?: AbortSignal,
 ): Promise<NovelReviewResult[]> {
   if (signal?.aborted) throw new Error("已停止生成")
+  const state = useWikiStore.getState()
   const llmConfig = resolveNovelModel(
-    useWikiStore.getState().llmConfig,
-    useWikiStore.getState().novelConfig,
+    state.llmConfig,
+    state.novelConfig,
     "review",
   )
-  if (!hasUsableLlm(llmConfig)) return []
+  if (!hasUsableLlm(llmConfig, state.providerConfigs)) return []
 
-  const novelMode = useWikiStore.getState().novelMode
+  const novelMode = state.novelMode
   if (!novelMode) return []
 
   // 复用调用方已构建的 contextPack；没有才自行构建。

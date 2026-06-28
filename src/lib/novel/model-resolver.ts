@@ -1,6 +1,7 @@
 import { useWikiStore, type LlmConfig, type NovelConfig, type ProviderOverride } from "@/stores/wiki-store"
 import { LLM_PRESETS } from "@/components/settings/llm-presets"
 import { resolveConfig } from "@/components/settings/preset-resolver"
+import { hasUsableLlm } from "@/lib/has-usable-llm"
 
 export type NovelTaskType = "writing" | "review" | "summary" | "extract" | "lint"
 
@@ -56,6 +57,10 @@ export function resolveKnownModelConfig(
   return null
 }
 
+function isConfigUsable(cfg: LlmConfig, providerConfigs: Record<string, ProviderOverride>): boolean {
+  return hasUsableLlm(cfg, providerConfigs)
+}
+
 export function resolveModelConfig(
   targetModel: string,
   baseConfig: LlmConfig,
@@ -64,7 +69,6 @@ export function resolveModelConfig(
   const known = resolveKnownModelConfig(targetModel, baseConfig, providerConfigs)
   if (known) return known
 
-  // 优先按 "providerId/modelId" 格式精确匹配
   const slashIdx = targetModel.indexOf("/")
   if (slashIdx > 0) {
     const providerId = targetModel.slice(0, slashIdx)
@@ -78,7 +82,7 @@ export function resolveModelConfig(
     }
     return { ...baseConfig, model: modelId }
   }
-  // 回退：按纯模型名匹配（兼容旧数据）
+
   for (const [providerId, override] of Object.entries(providerConfigs)) {
     if (override.savedModels?.some((m) => m.model === targetModel)) {
       const template = LLM_PRESETS.find((p) => p.id === providerId) ?? LLM_PRESETS.find((p) => p.id === "custom")
@@ -87,21 +91,30 @@ export function resolveModelConfig(
       }
     }
   }
+
   return { ...baseConfig, model: targetModel }
 }
 
-/**
- * 解析后台任务的默认模型。
- * 优先级：defaultLlmModel > aiChatModel > baseConfig
- * 用于提取记忆、提取角色等后台 AI 任务。
- */
 export function resolveDefaultModel(baseConfig: LlmConfig): LlmConfig {
   const { providerConfigs, defaultLlmModel, aiChatModel } = useWikiStore.getState()
-  const targetModel = defaultLlmModel?.trim() || aiChatModel?.trim()
-  if (targetModel) {
-    return resolveModelConfig(targetModel, baseConfig, providerConfigs)
+
+  const defaultModel = defaultLlmModel?.trim()
+  if (defaultModel) {
+    const cfg = resolveModelConfig(defaultModel, baseConfig, providerConfigs)
+    if (isConfigUsable(cfg, providerConfigs)) {
+      return cfg
+    }
   }
-  return baseConfig
+
+  const chatModel = aiChatModel?.trim()
+  if (chatModel && chatModel !== defaultModel) {
+    const cfg = resolveModelConfig(chatModel, baseConfig, providerConfigs)
+    if (isConfigUsable(cfg, providerConfigs)) {
+      return cfg
+    }
+  }
+
+  return { ...baseConfig, apiKey: "", model: "" }
 }
 
 export function resolveNovelModel(
@@ -110,7 +123,7 @@ export function resolveNovelModel(
   taskType: NovelTaskType,
 ): LlmConfig {
   const modelMap: Record<NovelTaskType, string> = {
-    writing: "", // 写作模型已移除，始终使用 AI 会话当前模型
+    writing: "",
     review: novelConfig.reviewModel,
     summary: novelConfig.summaryModel,
     extract: novelConfig.extractModel,
@@ -119,22 +132,61 @@ export function resolveNovelModel(
 
   const { providerConfigs, defaultLlmModel, aiChatModel, activePresetId } = useWikiStore.getState()
 
-  const taskModel = modelMap[taskType]
-  if (!taskModel) {
-    // 没有指定任务模型时：优先使用 AI 会话当前模型，再回退到默认模型
-    const targetModel = aiChatModel?.trim() || defaultLlmModel?.trim()
-    if (targetModel && isStaleModelRef(targetModel, activePresetId, providerConfigs)) {
-      const writingModel = taskType === "writing" ? novelConfig.writingModel?.trim() : ""
-      if (writingModel) {
-        return resolveModelConfig(writingModel, llmConfig, providerConfigs)
-      }
-      return llmConfig
-    }
-    if (targetModel) {
-      return resolveModelConfig(targetModel, llmConfig, providerConfigs)
-    }
-    return llmConfig
+  function resolveConfiguredModel(modelRef: string): LlmConfig | null {
+    const cfg = resolveModelConfig(modelRef, llmConfig, providerConfigs)
+    return isConfigUsable(cfg, providerConfigs) ? cfg : null
   }
 
-  return resolveModelConfig(taskModel, llmConfig, providerConfigs)
+  const taskModel = modelMap[taskType]?.trim()
+  if (taskModel) {
+    const cfg = resolveConfiguredModel(taskModel)
+    if (cfg) {
+      return cfg
+    }
+  }
+
+  const writingModel = taskType === "writing" ? novelConfig.writingModel?.trim() : ""
+
+  function resolveStaleFallback(modelRef: string): LlmConfig | null {
+    if (!isStaleModelRef(modelRef, activePresetId, providerConfigs)) return null
+    if (writingModel) {
+      return resolveConfiguredModel(writingModel)
+    }
+    return isConfigUsable(llmConfig, providerConfigs) ? llmConfig : null
+  }
+
+  const chatModel = aiChatModel?.trim()
+  if (chatModel) {
+    const staleFallback = resolveStaleFallback(chatModel)
+    if (staleFallback) {
+      return staleFallback
+    }
+
+    const cfg = resolveConfiguredModel(chatModel)
+    if (cfg) {
+      return cfg
+    }
+  }
+
+  const defaultModel = defaultLlmModel?.trim()
+  if (defaultModel && defaultModel !== chatModel) {
+    const staleFallback = resolveStaleFallback(defaultModel)
+    if (staleFallback) {
+      return staleFallback
+    }
+
+    const cfg = resolveConfiguredModel(defaultModel)
+    if (cfg) {
+      return cfg
+    }
+  }
+
+  if (writingModel && writingModel !== taskModel && writingModel !== chatModel && writingModel !== defaultModel) {
+    const cfg = resolveConfiguredModel(writingModel)
+    if (cfg) {
+      return cfg
+    }
+  }
+
+  return { ...llmConfig, apiKey: "", model: "" }
 }

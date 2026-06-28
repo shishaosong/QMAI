@@ -1,4 +1,4 @@
-import { useRef, useState, useCallback, type ReactNode } from "react"
+import { useRef, useState, useCallback, useEffect, type ReactNode } from "react"
 import { Send, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { isImeComposing } from "@/lib/keyboard-utils"
@@ -6,8 +6,29 @@ import { useChatStore } from "@/stores/chat-store"
 import {
   clampResizableInputHeight,
   DEFAULT_RESIZABLE_INPUT_HEIGHT,
-  resolveResizableInputMaxHeight,
+  getResizeBoundsForElement,
+  createResizeContext,
+  resolveMaxHeightFromContext,
+  isHeightAtMax,
+  isHeightAtMin,
+  type ResizeContext,
+  type ResizableInputBounds,
 } from "./chat-input-resize"
+
+const CHAT_INPUT_HEIGHT_KEY = "lk-chat-input-height"
+
+function loadSavedInputHeight(): number | null {
+  if (typeof localStorage === "undefined") return null
+  const raw = localStorage.getItem(CHAT_INPUT_HEIGHT_KEY)
+  if (!raw) return null
+  const v = Number(raw)
+  return Number.isFinite(v) && v >= DEFAULT_RESIZABLE_INPUT_HEIGHT ? Math.round(v) : null
+}
+
+function saveInputHeight(h: number) {
+  if (typeof localStorage === "undefined") return
+  localStorage.setItem(CHAT_INPUT_HEIGHT_KEY, String(Math.round(h)))
+}
 
 interface ChatInputProps {
   onSend: (text: string) => void
@@ -19,17 +40,6 @@ interface ChatInputProps {
   inlineSendButton?: boolean
   value?: string
   onChange?: (value: string) => void
-}
-
-function resolveResizePanelHeight(root: HTMLDivElement | null): number {
-  let current = root?.parentElement ?? null
-  let panelHeight = 0
-  while (current) {
-    const height = current.getBoundingClientRect().height
-    if (Number.isFinite(height)) panelHeight = Math.max(panelHeight, height)
-    current = current.parentElement
-  }
-  return panelHeight
 }
 
 export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingControls, footerControls, inlineSendButton = true, value: controlledValue, onChange }: ChatInputProps) {
@@ -45,9 +55,74 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
   const storeValue = conversation?.inputDraft ?? ""
   const value = isControlled ? controlledValue : activeConversationId ? storeValue : fallbackDraft
 
-  const [inputHeight, setInputHeight] = useState(DEFAULT_RESIZABLE_INPUT_HEIGHT)
+  const savedHeight = useRef<number | null>(loadSavedInputHeight())
+  const [inputHeight, setInputHeight] = useState<number>(() => savedHeight.current ?? DEFAULT_RESIZABLE_INPUT_HEIGHT)
+  const [userSetMinHeight, setUserSetMinHeight] = useState<number | null>(savedHeight.current)
+  const userSetMinHeightRef = useRef<number | null>(savedHeight.current)
+  const [isDragging, setIsDragging] = useState(false)
+  const [isAtLimitTop, setIsAtLimitTop] = useState(false)
+  const [isAtLimitBottom, setIsAtLimitBottom] = useState(true)
   const rootRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const resizeContextRef = useRef<ResizeContext | null>(null)
+  const dragHeightRef = useRef<number>(inputHeight)
+  const inputHeightRef = useRef<number>(inputHeight)
+
+  useEffect(() => {
+    inputHeightRef.current = inputHeight
+  }, [inputHeight])
+
+  const updateLimitState = useCallback((height: number) => {
+    const bounds = getResizeBoundsForElement(rootRef.current)
+    setIsAtLimitTop(isHeightAtMax(height, bounds))
+    setIsAtLimitBottom(isHeightAtMin(height, bounds))
+  }, [])
+
+  useEffect(() => {
+    updateLimitState(inputHeight)
+  }, [inputHeight, updateLimitState])
+
+  useEffect(() => {
+    userSetMinHeightRef.current = userSetMinHeight
+  }, [userSetMinHeight])
+
+  useEffect(() => {
+    const handleResize = () => {
+      const ta = textareaRef.current
+      const bounds = getResizeBoundsForElement(rootRef.current)
+      const minBase = userSetMinHeightRef.current ?? DEFAULT_RESIZABLE_INPUT_HEIGHT
+      if (ta) {
+        ta.style.height = "auto"
+        const contentHeight = ta.scrollHeight
+        const current = inputHeightRef.current
+        const next = clampResizableInputHeight(Math.max(minBase, contentHeight, current), bounds)
+        ta.style.height = `${next}px`
+        setInputHeight(next)
+      } else {
+        setInputHeight((prev) => clampResizableInputHeight(prev, bounds))
+      }
+    }
+    window.addEventListener("resize", handleResize)
+    return () => window.removeEventListener("resize", handleResize)
+  }, [])
+
+  const autoFitTextarea = useCallback(() => {
+    const ta = textareaRef.current
+    if (!ta) return
+    const bounds = getResizeBoundsForElement(rootRef.current)
+    const minBase = userSetMinHeightRef.current ?? DEFAULT_RESIZABLE_INPUT_HEIGHT
+    ta.style.height = "auto"
+    const contentHeight = ta.scrollHeight
+    const next = clampResizableInputHeight(Math.max(minBase, contentHeight), bounds)
+    ta.style.height = `${next}px`
+    setInputHeight(next)
+    setIsAtLimitTop(isHeightAtMax(next, bounds))
+    setIsAtLimitBottom(isHeightAtMin(next, bounds))
+  }, [])
+
+  useEffect(() => {
+    autoFitTextarea()
+  }, [value, autoFitTextarea])
 
   const setValue = useCallback(
     (draft: string) => {
@@ -62,24 +137,30 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
     [isControlled, onChange, activeConversationId, setConversationInputDraft]
   )
 
-  const getResizeBounds = useCallback(() => {
-    const panelHeight = resolveResizePanelHeight(rootRef.current)
-    return {
-      minHeight: DEFAULT_RESIZABLE_INPUT_HEIGHT,
-      maxHeight: resolveResizableInputMaxHeight({
-        panelHeight,
-        viewportHeight: window.innerHeight,
-      }),
-    }
+  const getStaticBounds = useCallback(() => {
+    return getResizeBoundsForElement(rootRef.current)
   }, [])
 
   const handleInput = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     setValue(e.target.value)
-    const ta = e.target
-    if (ta.scrollHeight > inputHeight) {
-      setInputHeight(clampResizableInputHeight(ta.scrollHeight, getResizeBounds()))
+    requestAnimationFrame(() => {
+      autoFitTextarea()
+    })
+  }, [setValue, autoFitTextarea])
+
+  const resetHeight = useCallback(() => {
+    setUserSetMinHeight(null)
+    const ta = textareaRef.current
+    const bounds = getResizeBoundsForElement(rootRef.current)
+    if (ta) {
+      ta.style.height = "auto"
+      const next = clampResizableInputHeight(Math.max(DEFAULT_RESIZABLE_INPUT_HEIGHT, ta.scrollHeight), bounds)
+      ta.style.height = `${next}px`
+      setInputHeight(next)
+    } else {
+      setInputHeight(DEFAULT_RESIZABLE_INPUT_HEIGHT)
     }
-  }, [getResizeBounds, inputHeight, setValue])
+  }, [])
 
   const handleResizePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
@@ -91,6 +172,12 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
     const startHeight = inputHeight
     const previousCursor = document.body.style.cursor
     document.body.style.cursor = "ns-resize"
+    setIsDragging(true)
+
+    const ctx = createResizeContext(rootRef.current, startHeight)
+    resizeContextRef.current = ctx
+    dragHeightRef.current = startHeight
+
     try {
       resizeHandle.setPointerCapture(pointerId)
     } catch {
@@ -99,9 +186,30 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
 
     const handlePointerMove = (pointerEvent: PointerEvent) => {
       const nextHeight = startHeight + (startY - pointerEvent.clientY)
-      setInputHeight(clampResizableInputHeight(nextHeight, getResizeBounds()))
+      let maxHeight: number
+      let bounds: ResizableInputBounds
+      if (resizeContextRef.current) {
+        maxHeight = resolveMaxHeightFromContext(resizeContextRef.current, nextHeight)
+        bounds = { minHeight: DEFAULT_RESIZABLE_INPUT_HEIGHT, maxHeight }
+      } else {
+        bounds = getStaticBounds()
+      }
+      const clamped = clampResizableInputHeight(nextHeight, bounds)
+      dragHeightRef.current = clamped
+      const ta = textareaRef.current
+      if (ta) {
+        ta.style.height = `${clamped}px`
+      }
+      setInputHeight(clamped)
+      setIsAtLimitTop(isHeightAtMax(clamped, bounds))
+      setIsAtLimitBottom(isHeightAtMin(clamped, bounds))
     }
     const handlePointerUp = () => {
+      const finalHeight = dragHeightRef.current
+      setUserSetMinHeight(finalHeight)
+      saveInputHeight(finalHeight)
+      resizeContextRef.current = null
+      setIsDragging(false)
       try {
         resizeHandle.releasePointerCapture(pointerId)
       } catch {
@@ -116,21 +224,27 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
     window.addEventListener("pointermove", handlePointerMove)
     window.addEventListener("pointerup", handlePointerUp)
     window.addEventListener("pointercancel", handlePointerUp)
-  }, [getResizeBounds, inputHeight])
+  }, [inputHeight, getStaticBounds])
+
+  const handleDoubleClick = useCallback(() => {
+    resetHeight()
+  }, [resetHeight])
 
   const handleSend = useCallback(() => {
     const trimmed = value.trim()
     if (!trimmed || isStreaming) return
     onSend(trimmed)
     setValue("")
+    setUserSetMinHeight(null)
+    setInputHeight(DEFAULT_RESIZABLE_INPUT_HEIGHT)
+    const ta = textareaRef.current
+    if (ta) {
+      ta.style.height = `${DEFAULT_RESIZABLE_INPUT_HEIGHT}px`
+    }
   }, [value, isStreaming, onSend, setValue])
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Don't submit on the Enter that commits an IME candidate —
-      // the user is mid-composition (Chinese / Japanese / Korean
-      // input method picking an English word or phrase) and would
-      // see the message fire before they finished typing.
       if (isImeComposing(e)) return
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault()
@@ -140,16 +254,33 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
     [handleSend],
   )
 
+  const handleBarColor = isDragging
+    ? isAtLimitTop
+      ? "bg-destructive/60"
+      : "bg-primary/60"
+    : isAtLimitTop
+      ? "bg-destructive/30"
+      : isAtLimitBottom
+        ? "bg-border"
+        : "bg-primary/30"
+
+  const resizeTitle = isAtLimitBottom
+    ? "向上拖动拉高输入框，双击重置高度"
+    : isAtLimitTop
+      ? "已达最大高度，向下拖动缩小，双击重置"
+      : "拖动调整输入框高度，双击重置"
+
   return (
     <div ref={rootRef} className="border-t">
       <div
         role="separator"
         aria-label="拖动调整输入框高度"
-        title="拖动调整输入框高度"
-        className="flex h-2 cursor-ns-resize items-center justify-center"
+        title={resizeTitle}
+        className="flex h-2 cursor-ns-resize items-center justify-center transition-colors"
         onPointerDown={handleResizePointerDown}
+        onDoubleClick={handleDoubleClick}
       >
-        <span className="h-0.5 w-10 rounded-full bg-border" />
+        <span className={`h-0.5 w-10 rounded-full transition-colors ${handleBarColor}`} />
       </div>
       {leadingControls ? (
         <div className="px-3 pb-2">
