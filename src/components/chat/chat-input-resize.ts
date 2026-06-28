@@ -30,18 +30,19 @@ export function createResizeContext(rootEl: HTMLDivElement | null, currentInputH
   const textareaEl = rootEl.querySelector("textarea")
   const textareaRect = textareaEl?.getBoundingClientRect()
   const actualTextareaHeight = textareaRect?.height ?? currentInputHeight
-  const fixedOverhead = Math.max(0, rootRect.height - actualTextareaHeight)
+  const chatInputOverhead = Math.max(0, rootRect.height - actualTextareaHeight)
+  const siblingOverhead = computeSiblingOverhead(rootEl, containerEl)
   return {
     startRootTop: rootRect.top,
     startRootHeight: rootRect.height,
     startInputHeight: currentInputHeight,
     viewportHeight: window.innerHeight,
     containerHeight,
-    fixedOverhead,
+    fixedOverhead: chatInputOverhead + siblingOverhead,
   }
 }
 
-function findChatContainer(root: HTMLDivElement): HTMLElement | null {
+export function findChatContainer(root: HTMLDivElement): HTMLElement | null {
   let current: HTMLElement | null = root.parentElement
   let fallback: HTMLElement | null = null
   for (let i = 0; i < 8 && current; i++) {
@@ -62,6 +63,30 @@ function findChatContainer(root: HTMLDivElement): HTMLElement | null {
     current = current.parentElement
   }
   return fallback ?? root.parentElement
+}
+
+/**
+ * 计算 ChatInput 根 div 之前的所有非 flex-grow 兄弟元素总高度。
+ * 用于在 maxHeight 计算中扣除 Header、Section 按钮区等外层固定开销，
+ * 防止 textarea 被允许拉高到超出容器实际可用空间。
+ */
+function computeSiblingOverhead(rootEl: HTMLDivElement, container: HTMLElement | null): number {
+  if (!container) return 0
+  let overhead = 0
+  let found = false
+  for (const child of Array.from(container.children)) {
+    if (child === rootEl || (child as HTMLElement).contains(rootEl)) {
+      found = true
+      break
+    }
+    const style = window.getComputedStyle(child as HTMLElement)
+    const flexGrow = parseFloat(style.flexGrow || "0")
+    // 跳过 flex-grow > 0 的元素（如 messages 区域 flex-1，会自适应）
+    if (flexGrow > 0) continue
+    const rect = (child as HTMLElement).getBoundingClientRect()
+    overhead += rect.height
+  }
+  return found ? overhead : 0
 }
 
 export function resolveMaxHeightFromContext(ctx: ResizeContext, nextHeight: number): number {
@@ -86,9 +111,10 @@ export function getResizeBoundsForElement(rootEl: HTMLDivElement | null): Resiza
   const rootRect = rootEl.getBoundingClientRect()
   const textareaEl = rootEl.querySelector("textarea")
   const textareaHeight = textareaEl?.getBoundingClientRect().height ?? DEFAULT_RESIZABLE_INPUT_HEIGHT
-  const fixedOverhead = Math.max(0, rootRect.height - textareaHeight)
+  const chatInputOverhead = Math.max(0, rootRect.height - textareaHeight)
+  const siblingOverhead = computeSiblingOverhead(rootEl, containerEl)
   const minMessageArea = computeMinMessageAreaHeight(containerHeight)
-  const containerMax = Math.max(DEFAULT_RESIZABLE_INPUT_HEIGHT, Math.floor(containerHeight - minMessageArea - fixedOverhead))
+  const containerMax = Math.max(DEFAULT_RESIZABLE_INPUT_HEIGHT, Math.floor(containerHeight - minMessageArea - chatInputOverhead - siblingOverhead))
   const viewportMax = Math.max(DEFAULT_RESIZABLE_INPUT_HEIGHT, Math.floor(window.innerHeight - rootRect.top - INPUT_BOTTOM_RESERVED))
   return {
     minHeight: DEFAULT_RESIZABLE_INPUT_HEIGHT,

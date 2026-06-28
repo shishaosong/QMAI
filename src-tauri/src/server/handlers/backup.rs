@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use axum::extract::{Multipart, State};
@@ -62,6 +63,7 @@ pub async fn import_backup_upload(
     let mut file_data: Option<Vec<u8>> = None;
     let mut strategy = backup::ImportStrategy::Full;
     let mut projects: Option<Vec<backup::ProjectRestoreInfo>> = None;
+    let mut project_path_overrides: Option<HashMap<String, String>> = None;
 
     // 解析 multipart 字段
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -85,6 +87,11 @@ pub async fn import_backup_upload(
             "projects" => {
                 if let Ok(text) = field.text().await {
                     projects = serde_json::from_str(&text).ok();
+                }
+            }
+            "projectPathOverrides" => {
+                if let Ok(text) = field.text().await {
+                    project_path_overrides = serde_json::from_str(&text).ok();
                 }
             }
             _ => {
@@ -112,6 +119,7 @@ pub async fn import_backup_upload(
         zip_path: zip_path.to_string_lossy().to_string(),
         strategy,
         projects,
+        project_path_overrides,
     };
 
     let app_state_dir = server_data_dir();

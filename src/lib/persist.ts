@@ -3,6 +3,57 @@ import type { ReviewItem } from "@/stores/review-store"
 import type { DisplayMessage, Conversation } from "@/stores/chat-store"
 import { normalizePath } from "@/lib/path-utils"
 
+const MAX_RETRIES = 3
+const RETRY_DELAY_MS = 500
+
+/**
+ * 按项目路径的写入锁，防止同一项目的多个保存操作并发写入。
+ * 当某个项目正在保存时，后续的保存请求会被跳过（最新数据会被下一次保存覆盖）。
+ */
+const saveLocks = new Map<string, Promise<void>>()
+
+/**
+ * 获取指定项目的写入锁。
+ * 如果已有保存操作在进行中，返回 null 表示跳过本次保存。
+ * 否则返回一个 release 函数，调用后释放锁。
+ */
+function acquireSaveLock(projectPath: string): (() => void) | null {
+  if (saveLocks.has(projectPath)) {
+    console.warn(`persist: 项目 ${projectPath} 正在保存中，跳过本次保存`)
+    return null
+  }
+  let release: () => void = () => {}
+  const lock = new Promise<void>((resolve) => {
+    release = () => {
+      saveLocks.delete(projectPath)
+      resolve()
+    }
+  })
+  saveLocks.set(projectPath, lock)
+  return release
+}
+
+/**
+ * 带重试的异步操作包装。
+ * 首次失败后等待 RETRY_DELAY_MS，之后每次翻倍（指数退避），最多重试 MAX_RETRIES 次。
+ */
+async function withRetry<T>(fn: () => Promise<T>, label: string): Promise<T> {
+  let lastError: unknown
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn()
+    } catch (err) {
+      lastError = err
+      if (attempt < MAX_RETRIES) {
+        const delay = RETRY_DELAY_MS * Math.pow(2, attempt)
+        console.warn(`persist: ${label} 失败(第${attempt + 1}次)，${delay}ms 后重试:`, err)
+        await new Promise((resolve) => setTimeout(resolve, delay))
+      }
+    }
+  }
+  throw lastError
+}
+
 function safeParseArray<T>(content: string, fieldName: string = "items"): T[] {
   try {
     const parsed = JSON.parse(content)
@@ -24,8 +75,17 @@ async function ensureDir(projectPath: string): Promise<void> {
 
 export async function saveReviewItems(projectPath: string, items: ReviewItem[]): Promise<void> {
   const pp = normalizePath(projectPath)
-  await ensureDir(pp)
-  await writeFile(`${pp}/.qmai/review.json`, JSON.stringify(items, null, 2))
+  const release = acquireSaveLock(`review:${pp}`)
+  if (!release) return // 已有保存操作在进行中，跳过
+  try {
+    await ensureDir(pp)
+    await withRetry(
+      () => writeFile(`${pp}/.qmai/review.json`, JSON.stringify(items, null, 2)),
+      "saveReviewItems",
+    )
+  } finally {
+    release()
+  }
 }
 
 export async function loadReviewItems(projectPath: string): Promise<ReviewItem[]> {
@@ -50,29 +110,41 @@ export async function saveChatHistory(
   maxMessages?: number
 ): Promise<void> {
   const pp = normalizePath(projectPath)
-  await ensureDir(pp)
+  const release = acquireSaveLock(`chat:${pp}`)
+  if (!release) return // 已有保存操作在进行中，跳过
+  try {
+    await ensureDir(pp)
 
-  // Save conversation list
-  await writeFile(
-    `${pp}/.qmai/conversations.json`,
-    JSON.stringify(conversations, null, 2)
-  )
-
-  // Save each conversation's messages separately
-  const byConversation = new Map<string, DisplayMessage[]>()
-  for (const msg of messages) {
-    const list = byConversation.get(msg.conversationId) ?? []
-    list.push(msg)
-    byConversation.set(msg.conversationId, list)
-  }
-
-  for (const [convId, msgs] of byConversation) {
-    // Keep last N messages per conversation
-    const toSave = msgs.slice(-(maxMessages || 100))
-    await writeFile(
-      `${pp}/.qmai/chats/${convId}.json`,
-      JSON.stringify(toSave, null, 2)
+    // Save conversation list
+    await withRetry(
+      () => writeFile(
+        `${pp}/.qmai/conversations.json`,
+        JSON.stringify(conversations, null, 2),
+      ),
+      "saveChatHistory(conversations)",
     )
+
+    // Save each conversation's messages separately
+    const byConversation = new Map<string, DisplayMessage[]>()
+    for (const msg of messages) {
+      const list = byConversation.get(msg.conversationId) ?? []
+      list.push(msg)
+      byConversation.set(msg.conversationId, list)
+    }
+
+    for (const [convId, msgs] of byConversation) {
+      // Keep last N messages per conversation
+      const toSave = msgs.slice(-(maxMessages || 100))
+      await withRetry(
+        () => writeFile(
+          `${pp}/.qmai/chats/${convId}.json`,
+          JSON.stringify(toSave, null, 2),
+        ),
+        `saveChatHistory(chat:${convId})`,
+      )
+    }
+  } finally {
+    release()
   }
 }
 

@@ -5,6 +5,11 @@ import type { LintResult } from "@/lib/lint"
 import type { NovelReviewResult } from "@/lib/novel/review-adapter"
 import type { DimensionReviewResult, SixReviewDimensionKey } from "@/lib/novel/dimension-review-adapter"
 import type { TrashItem } from "@/lib/trash"
+import {
+  DEFAULT_SIDEBAR_NAV_CONFIG,
+  normalizeSidebarNavConfig,
+  type SidebarNavConfig,
+} from "@/lib/sidebar-nav-preferences"
 
 const GRAPH_LABEL_MODE_KEY = "lk-graph-label-display-mode"
 const GRAPH_EDGE_COLOR_KEY = "lk-graph-edge-color"
@@ -13,6 +18,7 @@ const GRAPH_EDGE_STYLE_KEY = "lk-graph-edge-style"
 const GRAPH_EDGE_LABELS_ALWAYS_KEY = "lk-graph-edge-labels-always"
 const CHAT_DOCK_POSITION_KEY = "qmai-chat-dock-position"
 const UI_FONT_SIZE_SCALE_KEY = "qmai-ui-font-size-scale"
+const SIDEBAR_NAV_CONFIG_KEY = "qmai-sidebar-nav-config"
 
 export type ChatDockPosition = "bottom" | "right"
 export type SettingsCategoryId =
@@ -39,6 +45,16 @@ const readStoredUiFontSizeScale = (): number => {
   if (typeof localStorage === "undefined") return 1
   const saved = Number(localStorage.getItem(UI_FONT_SIZE_SCALE_KEY) ?? "1")
   return Number.isFinite(saved) ? Math.max(0.85, Math.min(1.3, Number(saved.toFixed(2)))) : 1
+}
+
+const readStoredSidebarNavConfig = (): SidebarNavConfig => {
+  if (typeof localStorage === "undefined") return DEFAULT_SIDEBAR_NAV_CONFIG
+  try {
+    const saved = localStorage.getItem(SIDEBAR_NAV_CONFIG_KEY)
+    return normalizeSidebarNavConfig(saved ? JSON.parse(saved) : null)
+  } catch {
+    return DEFAULT_SIDEBAR_NAV_CONFIG
+  }
 }
 
 const readStoredGraphLabelDisplayMode = (): string => {
@@ -526,6 +542,8 @@ interface WikiState {
   sourceWatchConfig: SourceWatchConfig
   novelMode: boolean
   chatEditModeEnabled: boolean
+  /** 深度模式状态：跨视图切换保持开启 */
+  deepChapterEnabled: boolean
   novelConfig: NovelConfig
   /** 社区摘要生成错误信息（UI 层监听并弹窗提示） */
   communitySummaryError: string | null
@@ -537,6 +555,7 @@ interface WikiState {
   reviewRun: ReviewRunState | null
   theme: "light" | "dark" | "deep-blue" | "system"
   uiFontSizeScale: number
+  sidebarNavConfig: SidebarNavConfig
   dataVersion: number
   bindingVersion: number
 
@@ -587,6 +606,7 @@ interface WikiState {
   setSourceWatchConfig: (sourceWatchConfig: SourceWatchConfig) => void
   setNovelMode: (novelMode: boolean) => void
   setChatEditModeEnabled: (enabled: boolean) => void
+  setDeepChapterEnabled: (enabled: boolean) => void
   setNovelConfig: (config: Partial<NovelConfig>) => void
   setCommunitySummaryError: (error: string | null) => void
   setSearchHistory: (history: string[]) => void
@@ -600,6 +620,7 @@ interface WikiState {
   clearTransientTaskState: () => void
   setTheme: (theme: "light" | "dark" | "deep-blue" | "system") => void
   setUiFontSizeScale: (scale: number) => void
+  setSidebarNavConfig: (config: Partial<SidebarNavConfig>) => void
   bumpDataVersion: () => void
   bumpBindingVersion: () => void
 }
@@ -753,6 +774,7 @@ export const useWikiStore = create<WikiState>((set) => ({
 
   novelMode: true,
   chatEditModeEnabled: false,
+  deepChapterEnabled: false,
   novelConfig: { ...DEFAULT_NOVEL_CONFIG },
   communitySummaryError: null,
   searchHistory: [],
@@ -768,6 +790,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   reviewRun: null,
   theme: "system",
   uiFontSizeScale: readStoredUiFontSizeScale(),
+  sidebarNavConfig: readStoredSidebarNavConfig(),
 
   setLlmConfig: (llmConfig) => set({ llmConfig }),
   setAiChatModel: (aiChatModel) => set({ aiChatModel }),
@@ -785,6 +808,7 @@ export const useWikiStore = create<WikiState>((set) => ({
   setSourceWatchConfig: (sourceWatchConfig) => set({ sourceWatchConfig }),
   setNovelMode: (novelMode) => set({ novelMode }),
   setChatEditModeEnabled: (chatEditModeEnabled) => set({ chatEditModeEnabled }),
+  setDeepChapterEnabled: (deepChapterEnabled) => set({ deepChapterEnabled }),
   setNovelConfig: (config) => set((state) => ({ novelConfig: { ...state.novelConfig, ...config } })),
   setCommunitySummaryError: (communitySummaryError) => set({ communitySummaryError }),
   setSearchHistory: (searchHistory) => set({ searchHistory }),
@@ -809,6 +833,13 @@ export const useWikiStore = create<WikiState>((set) => ({
       localStorage.setItem(UI_FONT_SIZE_SCALE_KEY, String(clamped))
     }
     set({ uiFontSizeScale: clamped })
+  },
+  setSidebarNavConfig: (config) => {
+    const normalized = normalizeSidebarNavConfig(config)
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(SIDEBAR_NAV_CONFIG_KEY, JSON.stringify(normalized))
+    }
+    set({ sidebarNavConfig: normalized })
   },
   bumpDataVersion: () => set((state) => ({ dataVersion: state.dataVersion + 1 })),
   bumpBindingVersion: () => set((state) => ({ bindingVersion: state.bindingVersion + 1 })),

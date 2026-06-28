@@ -19,13 +19,14 @@ interface ModelGroup {
 }
 
 const DROPDOWN_MAX_HEIGHT = 400
+const DROPDOWN_MIN_HEIGHT = 120
 const DROPDOWN_GAP = 6
 
 export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelectorProps) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
   const triggerRef = useRef<HTMLButtonElement>(null)
-  const [dropdownStyle, setDropdownStyle] = useState<{ left: number; top: number; width: number } | null>(null)
+  const [dropdownStyle, setDropdownStyle] = useState<{ left: number; top: number; width: number; maxHeight: number } | null>(null)
   const providerConfigs = useWikiStore((s) => s.providerConfigs)
 
   // 按预设/卡片分组：所有启用的内置预设 + 所有启用的自定义卡片
@@ -103,20 +104,28 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
       const availableAbove = rect.top
       const availableBelow = window.innerHeight - rect.bottom
       let top: number
-      if (availableAbove >= DROPDOWN_MAX_HEIGHT + DROPDOWN_GAP || availableAbove >= availableBelow) {
-        top = Math.max(4, rect.top - DROPDOWN_MAX_HEIGHT - DROPDOWN_GAP)
+      let maxHeight: number
+      // 始终优先放下方，只有下方空间不足最小高度时才翻转到上方
+      if (availableBelow < DROPDOWN_MIN_HEIGHT && availableAbove >= DROPDOWN_MIN_HEIGHT) {
+        maxHeight = Math.min(DROPDOWN_MAX_HEIGHT, availableAbove - DROPDOWN_GAP)
+        top = rect.top - maxHeight - DROPDOWN_GAP
       } else {
+        maxHeight = Math.min(DROPDOWN_MAX_HEIGHT, Math.max(DROPDOWN_MIN_HEIGHT, availableBelow - DROPDOWN_GAP))
         top = rect.bottom + DROPDOWN_GAP
       }
       setDropdownStyle({
         left: Math.min(rect.left, window.innerWidth - width - 4),
         top,
         width,
+        maxHeight,
       })
     }
-    updatePosition()
+    const raf = requestAnimationFrame(updatePosition)
     window.addEventListener("resize", updatePosition)
-    return () => window.removeEventListener("resize", updatePosition)
+    return () => {
+      cancelAnimationFrame(raf)
+      window.removeEventListener("resize", updatePosition)
+    }
   }, [open])
 
   return (
@@ -138,17 +147,19 @@ export function ChatModelSelector({ value, onChange, disabled }: ChatModelSelect
       {open && dropdownStyle && createPortal(
         <>
           <div
-            className="fixed inset-0 z-40"
+            className="fixed inset-0"
+            style={{ zIndex: 9998 }}
             onClick={() => setOpen(false)}
           />
           <div
-            className="fixed z-50 rounded-md border bg-popover p-1 shadow-md"
+            className="fixed rounded-md border bg-popover p-1 shadow-md model-selector-dropdown"
             style={{
               left: dropdownStyle.left,
               top: dropdownStyle.top,
               width: dropdownStyle.width,
-              maxHeight: DROPDOWN_MAX_HEIGHT,
+              maxHeight: dropdownStyle.maxHeight,
               overflowY: "auto",
+              zIndex: 9999,
             }}
           >
             {modelGroups.map((group, groupIdx) => (

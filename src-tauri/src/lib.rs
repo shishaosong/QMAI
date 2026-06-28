@@ -161,6 +161,7 @@ pub fn run() {
             commands::file_sync::ignore_file_change_task,
             commands::backup::export_backup,
             commands::backup::import_backup,
+            commands::backup::read_backup_manifest,
             set_proxy_env,
         ])
         .on_window_event(|window, event| {

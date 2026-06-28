@@ -1,5 +1,5 @@
 import { useRef, useState, useCallback, useEffect, type ReactNode } from "react"
-import { Send, Square } from "lucide-react"
+import { ArrowUp, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { isImeComposing } from "@/lib/keyboard-utils"
 import { useChatStore } from "@/stores/chat-store"
@@ -11,6 +11,7 @@ import {
   resolveMaxHeightFromContext,
   isHeightAtMax,
   isHeightAtMin,
+  findChatContainer,
   type ResizeContext,
   type ResizableInputBounds,
 } from "./chat-input-resize"
@@ -35,14 +36,19 @@ interface ChatInputProps {
   onStop: () => void
   isStreaming: boolean
   placeholder?: string
+  leftControls?: ReactNode
+  rightControls?: ReactNode
+  /** @deprecated 请使用 leftControls 代替 */
   leadingControls?: ReactNode
+  /** @deprecated 请使用 leftControls 代替 */
   footerControls?: ReactNode
-  inlineSendButton?: boolean
   value?: string
   onChange?: (value: string) => void
 }
 
-export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingControls, footerControls, inlineSendButton = true, value: controlledValue, onChange }: ChatInputProps) {
+export function ChatInput({ onSend, onStop, isStreaming, placeholder, leftControls, rightControls, leadingControls, footerControls, value: controlledValue, onChange }: ChatInputProps) {
+  const leftToolbarContent = leftControls ?? leadingControls ?? footerControls
+  const rightToolbarContent = rightControls
   const activeConversationId = useChatStore((state) => state.activeConversationId)
   const setConversationInputDraft = useChatStore((state) => state.setConversationInputDraft)
   const conversation = useChatStore((state) =>
@@ -86,34 +92,96 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
     userSetMinHeightRef.current = userSetMinHeight
   }, [userSetMinHeight])
 
-  useEffect(() => {
-    const handleResize = () => {
-      const ta = textareaRef.current
+  const handleContainerResize = useCallback(() => {
+    const userMin = userSetMinHeightRef.current
+    const ta = textareaRef.current
+
+    if (userMin != null) {
+      // 用户已手动设置高度：容器变化时只做上下边界检查，保持高度尽量不变
       const bounds = getResizeBoundsForElement(rootRef.current)
-      const minBase = userSetMinHeightRef.current ?? DEFAULT_RESIZABLE_INPUT_HEIGHT
-      if (ta) {
-        ta.style.height = "auto"
-        const contentHeight = ta.scrollHeight
-        const current = inputHeightRef.current
-        const next = clampResizableInputHeight(Math.max(minBase, contentHeight, current), bounds)
-        ta.style.height = `${next}px`
+      const current = inputHeightRef.current
+      const next = clampResizableInputHeight(current, bounds)
+      if (next !== current) {
+        if (ta) {
+          ta.style.height = `${next}px`
+        }
         setInputHeight(next)
-      } else {
-        setInputHeight((prev) => clampResizableInputHeight(prev, bounds))
+        setUserSetMinHeight(next)
+        // 同步到 localStorage，防止下次启动仍用超出边界的高度
+        saveInputHeight(next)
       }
+      setIsAtLimitTop(isHeightAtMax(next, bounds))
+      setIsAtLimitBottom(isHeightAtMin(next, bounds))
+      return
     }
-    window.addEventListener("resize", handleResize)
-    return () => window.removeEventListener("resize", handleResize)
+
+    if (ta) {
+      const bounds = getResizeBoundsForElement(rootRef.current)
+      ta.style.height = "auto"
+      const contentHeight = ta.scrollHeight
+      const current = inputHeightRef.current
+      const next = clampResizableInputHeight(Math.max(DEFAULT_RESIZABLE_INPUT_HEIGHT, contentHeight, current), bounds)
+      ta.style.height = `${next}px`
+      setInputHeight(next)
+    } else {
+      const bounds = getResizeBoundsForElement(rootRef.current)
+      setInputHeight((prev) => clampResizableInputHeight(prev, bounds))
+    }
+  }, [])
+
+  // 监听 window resize
+  useEffect(() => {
+    window.addEventListener("resize", handleContainerResize)
+    return () => window.removeEventListener("resize", handleContainerResize)
+  }, [handleContainerResize])
+
+  // 使用 ResizeObserver 监听容器大小变化（停靠模式切换、容器拖拽等）
+  useEffect(() => {
+    const rootEl = rootRef.current
+    if (!rootEl) return
+    const containerEl = findChatContainer(rootEl)
+    if (!containerEl || typeof ResizeObserver === "undefined") return
+
+    const observer = new ResizeObserver(() => {
+      handleContainerResize()
+    })
+    observer.observe(containerEl)
+    return () => observer.disconnect()
+  }, [handleContainerResize])
+
+  // 挂载时校验 localStorage 中保存的高度是否超出当前容器 maxHeight
+  // 防止在不同停靠模式（右侧大容器 vs 底部小容器）间切换时 textarea 高度溢出
+  useEffect(() => {
+    const saved = savedHeight.current
+    if (saved == null) return
+    const bounds = getResizeBoundsForElement(rootRef.current)
+    const clamped = clampResizableInputHeight(saved, bounds)
+    if (clamped !== saved) {
+      const ta = textareaRef.current
+      if (ta) {
+        ta.style.height = `${clamped}px`
+      }
+      setInputHeight(clamped)
+      setUserSetMinHeight(clamped)
+      saveInputHeight(clamped)
+    }
   }, [])
 
   const autoFitTextarea = useCallback(() => {
     const ta = textareaRef.current
     if (!ta) return
+    const userMin = userSetMinHeightRef.current
+
+    // 用户已手动设置高度：保持固定高度，不随内容自适应
+    // 内容超出时 textarea 内部自动滚动，高度始终不变
+    if (userMin != null) {
+      return
+    }
+
     const bounds = getResizeBoundsForElement(rootRef.current)
-    const minBase = userSetMinHeightRef.current ?? DEFAULT_RESIZABLE_INPUT_HEIGHT
     ta.style.height = "auto"
     const contentHeight = ta.scrollHeight
-    const next = clampResizableInputHeight(Math.max(minBase, contentHeight), bounds)
+    const next = clampResizableInputHeight(Math.max(DEFAULT_RESIZABLE_INPUT_HEIGHT, contentHeight), bounds)
     ta.style.height = `${next}px`
     setInputHeight(next)
     setIsAtLimitTop(isHeightAtMax(next, bounds))
@@ -271,64 +339,66 @@ export function ChatInput({ onSend, onStop, isStreaming, placeholder, leadingCon
       : "拖动调整输入框高度，双击重置"
 
   return (
-    <div ref={rootRef} className="border-t">
-      <div
-        role="separator"
-        aria-label="拖动调整输入框高度"
-        title={resizeTitle}
-        className="flex h-2 cursor-ns-resize items-center justify-center transition-colors"
-        onPointerDown={handleResizePointerDown}
-        onDoubleClick={handleDoubleClick}
-      >
-        <span className={`h-0.5 w-10 rounded-full transition-colors ${handleBarColor}`} />
-      </div>
-      {leadingControls ? (
-        <div className="px-3 pb-2">
-          {leadingControls}
+    <div ref={rootRef} className="border-t px-3 pt-1.5 pb-0">
+      <div className="rounded-2xl border bg-background shadow-sm overflow-hidden flex flex-col">
+        <div
+          role="separator"
+          aria-label="拖动调整输入框高度"
+          title={resizeTitle}
+          className="flex h-2 cursor-ns-resize items-center justify-center transition-colors"
+          onPointerDown={handleResizePointerDown}
+          onDoubleClick={handleDoubleClick}
+        >
+          <span className={`h-0.5 w-10 rounded-full transition-colors ${handleBarColor}`} />
         </div>
-      ) : null}
-      <div className="flex items-end gap-2 px-3 pb-3">
-        <textarea
-          ref={textareaRef}
-          value={value}
-          dir="auto"
-          onChange={handleInput}
-          onKeyDown={handleKeyDown}
-          placeholder={placeholder ?? "输入消息，Enter 发送，Shift+Enter 换行"}
-          disabled={isStreaming}
-          rows={1}
-          className="flex-1 resize-none rounded-md border bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-          style={{ height: inputHeight, maxHeight: inputHeight, overflowY: "auto" }}
-        />
-        {inlineSendButton && (isStreaming ? (
-          <Button
-            variant="destructive"
-            size="icon"
-            onClick={onStop}
-            className="shrink-0"
-            title="停止生成"
-            aria-label="停止生成"
-          >
-            <Square className="h-4 w-4" />
-          </Button>
-        ) : (
-          <Button
-            size="icon"
-            onClick={handleSend}
-            disabled={!value.trim()}
-            className="shrink-0"
-            title="发送消息"
-            aria-label="发送消息"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        ))}
-      </div>
-      {footerControls ? (
-        <div className="px-3 pb-2">
-          {footerControls}
+        <div className="px-3 pt-1.5">
+          <textarea
+            ref={textareaRef}
+            value={value}
+            dir="auto"
+            onChange={handleInput}
+            onKeyDown={handleKeyDown}
+            placeholder={placeholder ?? "输入消息，Enter 发送，Shift+Enter 换行"}
+            disabled={isStreaming}
+            rows={1}
+            className="w-full resize-none bg-transparent px-0 py-1.5 text-sm placeholder:text-muted-foreground focus:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+            style={{ height: inputHeight, maxHeight: inputHeight, overflowY: "auto" }}
+          />
         </div>
-      ) : null}
+        <div className="flex items-center justify-between border-t px-3 py-2 gap-2">
+          {leftToolbarContent ? (
+            <div className="flex items-center gap-2 min-w-0 overflow-x-auto">
+              {leftToolbarContent}
+            </div>
+          ) : (
+            <div className="flex-1" />
+          )}
+          <div className="flex items-center gap-2 shrink-0">
+            {rightToolbarContent}
+            {isStreaming ? (
+              <Button
+                variant="destructive"
+                size="icon"
+                onClick={onStop}
+                title="停止生成"
+                aria-label="停止生成"
+              >
+                <Square className="h-4 w-4" />
+              </Button>
+            ) : (
+              <Button
+                size="icon"
+                onClick={handleSend}
+                disabled={!value.trim()}
+                title="发送消息"
+                aria-label="发送消息"
+              >
+                <ArrowUp className="h-4 w-4" />
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

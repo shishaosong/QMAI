@@ -35,6 +35,7 @@ export interface ImportParams {
   zipPath: string
   strategy: ImportStrategy
   projects?: ProjectRestoreInfo[]
+  projectPathOverrides?: Record<string, string>
 }
 
 /** 项目恢复结果 */
@@ -62,6 +63,14 @@ export interface BackupManifest {
   createdAt: string
   appVersion: string
   projects: ProjectBackupInfo[]
+}
+
+/** manifest 项目条目（含路径可达性） */
+export interface ProjectManifestEntry {
+  id: string
+  path: string
+  name: string
+  pathAccessible: boolean
 }
 
 /** 进度事件载荷 */

@@ -4,10 +4,10 @@ import { useWikiStore } from "@/stores/wiki-store"
 import { useReviewStore } from "@/stores/review-store"
 import { isTauri, pickDirectory } from "@/lib/platform"
 import { useChatStore } from "@/stores/chat-store"
-import { listDirectory, openProject } from "@/commands/fs"
-import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, saveLlmConfig } from "@/lib/project-store"
-import { loadReviewItems, loadChatHistory } from "@/lib/persist"
-import { setupAutoSave } from "@/lib/auto-save"
+import { listDirectory, openProject, fileExists } from "@/commands/fs"
+import { getLastProject, saveLastProject, loadLlmConfig, loadAiChatModel, loadDefaultLlmModel, loadLanguage, loadEmbeddingConfig, loadProviderConfigs, loadActivePresetId, loadProxyConfig, loadScheduledImportConfig, saveScheduledImportConfig, loadSourceWatchConfig, loadNovelMode, loadNovelConfig, loadRevisionFeedbackWindowConfig, loadTheme, loadMaxHistoryMessages, saveLlmConfig, loadLastReadChapter } from "@/lib/project-store"
+import { loadReviewItems, loadChatHistory, saveChatHistory, saveReviewItems } from "@/lib/persist"
+import { setupAutoSave, teardownAutoSave } from "@/lib/auto-save"
 import { checkForAppUpdate } from "@/lib/app-updater"
 import { initAnalytics } from "@/lib/analytics"
 import { restoreQueue as restoreIngestQueue } from "@/lib/ingest-queue"
@@ -49,6 +49,49 @@ function App() {
   // Set up auto-save once on mount
   useEffect(() => {
     setupAutoSave()
+
+    // 注册 Tauri 窗口关闭前保存
+    let unlisten: (() => void) | undefined
+    let isClosing = false // 防止递归关闭
+    if (isTauri()) {
+      import("@tauri-apps/api/window").then(({ getCurrentWindow }) => {
+        getCurrentWindow().onCloseRequested(async (event) => {
+          // 防止递归：close() 会再次触发 onCloseRequested
+          if (isClosing) return
+          isClosing = true
+
+          // 阻止窗口立即关闭，等待保存完成
+          event.preventDefault()
+
+          // 关闭前执行最终保存，防止丢失最后几秒的数据
+          const project = useWikiStore.getState().project
+          if (project) {
+            const chatState = useChatStore.getState()
+            if (chatState.conversations.length > 0) {
+              await saveChatHistory(
+                project.path,
+                chatState.conversations,
+                chatState.messages,
+                chatState.maxHistoryMessages,
+              ).catch((err) => console.error("关闭前保存聊天历史失败:", err))
+            }
+            const reviewState = useReviewStore.getState()
+            if (reviewState.items.length > 0) {
+              await saveReviewItems(project.path, reviewState.items)
+                .catch((err) => console.error("关闭前保存审查项失败:", err))
+            }
+          }
+
+          // 保存完成后手动关闭窗口
+          await getCurrentWindow().close()
+        }).then((fn) => { unlisten = fn })
+      })
+    }
+
+    return () => {
+      teardownAutoSave()
+      unlisten?.()
+    }
   }, [])
 
   
@@ -181,6 +224,20 @@ function App() {
     setActiveView("wiki")
     useWikiStore.getState().bumpDataVersion()
     await saveLastProject(proj)
+
+    // 自动打开最后阅读的章节和AI会话窗口
+    try {
+      const lastChapterPath = await loadLastReadChapter()
+      if (lastChapterPath) {
+        const exists = await fileExists(lastChapterPath)
+        if (exists) {
+          setSelectedFile(lastChapterPath)
+        }
+      }
+    } catch (err) {
+      console.error("加载最后阅读章节失败:", err)
+    }
+    useWikiStore.getState().setChatExpanded(true)
 
     if (isTauri()) {
       try {

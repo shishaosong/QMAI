@@ -13,6 +13,7 @@ import { normalizeChapterStatus, type ChapterStatus } from "@/lib/novel/chapter-
 import { moveFileToTrash } from "@/lib/trash"
 import { makeChapterFileName, makeDefaultChapterTitle, makeSafeFileSlug } from "@/lib/wiki-filename"
 import { useImportProgressStore } from "@/stores/import-progress-store"
+import { saveLastReadChapter } from "@/lib/project-store"
 
 interface WikiPageInfo {
   path: string
@@ -829,6 +830,8 @@ export function KnowledgeTree({
     setArmedPath(null)
     if (renamingPath === pagePath) return
     setSelectedFile(pagePath)
+    // 保存最后阅读的章节路径，用于启动时自动打开
+    saveLastReadChapter(pagePath).catch(() => {})
   }, [renamingPath, setSelectedFile])
 
   const toggleFolder = useCallback((folderPath: string) => {
@@ -1275,7 +1278,7 @@ export function RawSourcesSection({ onCancelExtraction }: { onCancelExtraction?:
         ) : null}
       </button>
       {expanded && (
-        <div className="ml-3 space-y-2 pr-1 text-xs text-muted-foreground">
+        <div className="ml-3 max-h-64 space-y-2 overflow-y-auto pr-1 text-xs text-muted-foreground">
           {hasAnyTask ? (
             projectTasks.slice(0, 20).map((task) => {
               const kindLabel =

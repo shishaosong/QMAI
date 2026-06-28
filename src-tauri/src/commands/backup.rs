@@ -58,6 +58,7 @@ pub struct ImportParams {
     pub zip_path: String,
     pub strategy: ImportStrategy,
     pub projects: Option<Vec<ProjectRestoreInfo>>,
+    pub project_path_overrides: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -91,6 +92,15 @@ pub struct BackupManifest {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct ProjectManifestEntry {
+    pub id: String,
+    pub path: String,
+    pub name: String,
+    pub path_accessible: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct BackupProgressPayload {
     pub operation: String,
     pub stage: String,
@@ -99,7 +109,7 @@ pub struct BackupProgressPayload {
     pub message: String,
 }
 
-const PROJECT_SUBDIRS: &[&str] = &[".qmai", ".novel", "book-analysis", "raw"];
+const PROJECT_SUBDIRS: &[&str] = &[".qmai", ".novel", "book-analysis", "raw", ".trash"];
 const PROJECT_FILES: &[&str] = &["soul.md", "schema.md", "purpose.md"];
 
 // 知识目录的可能名称（新版用 QM，旧版用 wiki），导出时统一以 wiki 名称存入 zip
@@ -288,6 +298,29 @@ fn extract_dir_from_zip(
         count += 1;
     }
     Ok(count)
+}
+
+/// 检查项目路径的根（盘符/根目录）是否可达。
+/// Windows: 检查盘符是否存在（如 "D:\" 存在）。
+/// Unix: 根目录 "/" 始终可达。
+fn is_path_root_accessible(path: &str) -> bool {
+    let p = Path::new(path);
+    match p.components().next() {
+        Some(std::path::Component::Prefix(prefix)) => {
+            // Windows 驱动器前缀（如 "C:" "D:"）
+            let prefix_path = prefix.as_os_str();
+            let root = if prefix_path.to_string_lossy().len() == 2 {
+                // "D:" → "D:\"
+                format!("{}\\", prefix_path.to_string_lossy())
+            } else {
+                // UNC 路径等，直接检查
+                prefix_path.to_string_lossy().to_string()
+            };
+            Path::new(&root).exists()
+        }
+        Some(std::path::Component::RootDir) => true,
+        _ => true,
+    }
 }
 
 // ── Core logic (Tauri-agnostic) ──────────────────────────────────
@@ -588,7 +621,15 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
         let projects_to_restore: Vec<(String, String, String)> = match &params.strategy {
             ImportStrategy::Full => manifest_projects
                 .iter()
-                .map(|p| (p.id.clone(), p.path.clone(), p.name.clone()))
+                .map(|p| {
+                    let path = params
+                        .project_path_overrides
+                        .as_ref()
+                        .and_then(|m| m.get(&p.id))
+                        .cloned()
+                        .unwrap_or_else(|| p.path.clone());
+                    (p.id.clone(), path, p.name.clone())
+                })
                 .collect(),
             ImportStrategy::Selective => params
                 .projects
@@ -676,6 +717,37 @@ pub fn do_import_backup<F: Fn(&BackupProgressPayload)>(
     })
 }
 
+/// 读取备份文件中的 manifest.json，返回项目列表及路径可达性。
+/// 不做实际解压，供前端在导入前检查路径。
+pub fn do_read_backup_manifest(zip_path: &Path) -> Result<Vec<ProjectManifestEntry>, String> {
+    if !zip_path.exists() {
+        return Err("备份文件不存在".to_string());
+    }
+
+    let file = fs::File::open(zip_path).map_err(|e| format!("打开备份文件失败: {e}"))?;
+    let mut archive =
+        zip::ZipArchive::new(file).map_err(|e| format!("读取备份文件失败，可能已损坏: {e}"))?;
+
+    let manifest_bytes = extract_file_from_zip(&mut archive, "manifest.json")?
+        .ok_or_else(|| "备份文件缺少 manifest.json".to_string())?;
+
+    let manifest: BackupManifest = serde_json::from_slice(&manifest_bytes)
+        .map_err(|e| format!("解析 manifest.json 失败: {e}"))?;
+
+    let entries = manifest
+        .projects
+        .iter()
+        .map(|p| ProjectManifestEntry {
+            id: p.id.clone(),
+            path: p.path.clone(),
+            name: p.name.clone(),
+            path_accessible: is_path_root_accessible(&p.path),
+        })
+        .collect();
+
+    Ok(entries)
+}
+
 // ── Tauri commands ───────────────────────────────────────────────
 
 #[tauri::command]
@@ -750,6 +822,14 @@ pub async fn import_backup(
     })
 }
 
+#[tauri::command]
+pub async fn read_backup_manifest(zip_path: String) -> Result<Vec<ProjectManifestEntry>, String> {
+    run_guarded("read_backup_manifest", || {
+        let path = Path::new(&zip_path);
+        do_read_backup_manifest(path)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -817,5 +897,31 @@ mod tests {
         assert!(target.join("sub/chapter2.md").exists());
 
         std::fs::remove_dir_all(&tmp).ok();
+    }
+
+    #[test]
+    fn test_trash_in_project_subdirs() {
+        assert!(
+            PROJECT_SUBDIRS.contains(&".trash"),
+            ".trash 应包含在 PROJECT_SUBDIRS 中"
+        );
+    }
+
+    #[test]
+    fn test_is_path_root_accessible_windows_drive() {
+        // C 盘在 Windows 上始终存在
+        assert!(is_path_root_accessible("C:\\some\\path"));
+    }
+
+    #[test]
+    fn test_is_path_root_accessible_unix_root() {
+        // Unix 根目录始终可达
+        assert!(is_path_root_accessible("/home/user/project"));
+    }
+
+    #[test]
+    fn test_is_path_root_accessible_nonexistent_drive() {
+        // Z 盘大概率不存在
+        assert!(!is_path_root_accessible("Z:\\nonexistent\\path"));
     }
 }
